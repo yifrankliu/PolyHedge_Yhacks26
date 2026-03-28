@@ -1,0 +1,14 @@
+# Environment variables — never commit secrets
+backend/.env
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+
+# Node
+frontend/node_modules/
+frontend/build/
+
+# macOS
+.DS_Store
