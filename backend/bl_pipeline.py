@@ -11,6 +11,7 @@ Pipeline:
   7. Integrate RND above threshold → P(S_T > threshold)
 """
 
+import asyncio
 import numpy as np
 from scipy.stats import norm
 from scipy.interpolate import UnivariateSpline
@@ -47,9 +48,9 @@ def implied_vol(price: float, S: float, K: float, T: float, r: float) -> Optiona
 # ── Deribit helpers ────────────────────────────────────────────────────────────
 
 def date_to_deribit_expiry(date_str: str) -> str:
-    """'2025-06-27' → '27JUN25'"""
+    """'2026-06-26' → '26JUN26' (Deribit uses non-zero-padded days: '1APR26' not '01APR26')"""
     dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return dt.strftime("%d%b%y").upper()
+    return f"{dt.day}{dt.strftime('%b').upper()}{dt.strftime('%y')}"
 
 
 async def fetch_spot(asset: str) -> float:
@@ -216,6 +217,3 @@ async def bl_pipeline(asset: str, threshold: float, expiry: str) -> dict:
     result["expiry_deribit"] = deribit_expiry
     result["T_years"] = round(T, 4)
     return result
-
-
-import asyncio
