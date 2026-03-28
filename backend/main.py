@@ -1,3 +1,4 @@
+import asyncio
 import os
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -13,6 +14,7 @@ from kelly import (
     breakeven_probability,
 )
 from bl_pipeline import bl_pipeline, fetch_vol_surface
+from correlation import correlate
 
 load_dotenv()
 
@@ -34,6 +36,8 @@ app.add_middleware(
 KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
+ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
+ODDPOOL_BASE = "https://api.oddpool.com"
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -83,54 +87,105 @@ async def whatif(req: WhatIfRequest):
 
 # ── Market search endpoints ────────────────────────────────────────────────────
 
+def _oddpool_headers() -> dict:
+    if not ODDPOOL_API_KEY:
+        raise HTTPException(503, "ODDPOOL_API_KEY not configured")
+    return {"X-API-Key": ODDPOOL_API_KEY}
+
+
 @app.get("/markets/polymarket")
 async def search_polymarket(search: str = Query(..., min_length=1)):
+    headers = _oddpool_headers()
+
+    # Search events (titles) — broader match than searching market questions directly
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{POLYMARKET_GAMMA}/markets",
-            params={"search": search, "limit": 10, "active": True},
+            f"{ODDPOOL_BASE}/search/events",
+            params={"q": search, "limit": 20},
+            headers=headers,
         )
+    if resp.status_code == 429:
+        raise HTTPException(429, "Rate limit — wait a moment and try again")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Polymarket error: {resp.status_code}")
-    markets = resp.json()
-    return [
-        {
-            "id": m.get("id"),
-            "question": m.get("question"),
-            "price": float(m.get("lastTradePrice", 0)),
-            "volume": m.get("volume"),
-            "end_date": m.get("endDate"),
-            "source": "polymarket",
-        }
-        for m in (markets if isinstance(markets, list) else markets.get("markets", []))
-    ]
+        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
+
+    events = resp.json() if isinstance(resp.json(), list) else []
+    poly_events = [e for e in events if e.get("exchange") == "polymarket"][:5]
+
+    seen: set[str] = set()
+    results = []
+
+    for event in poly_events:
+        await asyncio.sleep(1.1)  # Oddpool burst limit: 1 req/sec
+        event_id = event.get("event_id")
+        async with httpx.AsyncClient(timeout=10) as client:
+            mresp = await client.get(
+                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
+                headers=headers,
+            )
+        if mresp.status_code != 200:
+            continue
+        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
+            mid = m.get("market_id")
+            if mid and mid not in seen:
+                seen.add(mid)
+                results.append({
+                    "id": mid,
+                    "question": m.get("question"),
+                    "price": float(m.get("last_yes_price") or 0),
+                    "volume": m.get("volume"),
+                    "end_date": None,
+                    "source": "polymarket",
+                })
+
+    return results
 
 
 @app.get("/markets/kalshi")
 async def search_kalshi(search: str = Query(..., min_length=1)):
-    headers = {}
-    if KALSHI_API_KEY:
-        headers["Authorization"] = f"Token {KALSHI_API_KEY}"
+    headers = _oddpool_headers()
+
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{KALSHI_BASE}/markets",
-            params={"search": search, "limit": 10, "status": "open"},
+            f"{ODDPOOL_BASE}/search/events",
+            params={"q": search, "limit": 20},
             headers=headers,
         )
+    if resp.status_code == 429:
+        raise HTTPException(429, "Rate limit — wait a moment and try again")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Kalshi error: {resp.status_code}")
-    data = resp.json()
-    return [
-        {
-            "id": m.get("ticker"),
-            "question": m.get("title"),
-            "price": m.get("last_price", 0) / 100 if m.get("last_price") else None,
-            "volume": m.get("volume"),
-            "end_date": m.get("close_time"),
-            "source": "kalshi",
-        }
-        for m in data.get("markets", [])
-    ]
+        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
+
+    events = resp.json() if isinstance(resp.json(), list) else []
+    kalshi_events = [e for e in events if e.get("exchange") == "kalshi"][:5]
+
+    seen: set[str] = set()
+    results = []
+
+    for event in kalshi_events:
+        await asyncio.sleep(1.1)
+        event_id = event.get("event_id")
+        async with httpx.AsyncClient(timeout=10) as client:
+            mresp = await client.get(
+                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
+                headers=headers,
+            )
+        if mresp.status_code != 200:
+            continue
+        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
+            mid = m.get("market_id")
+            if mid and mid not in seen:
+                seen.add(mid)
+                results.append({
+                    "id": mid,
+                    "question": m.get("question"),
+                    "price": float(m.get("last_yes_price") or 0),
+                    "volume": m.get("volume"),
+                    "end_date": None,
+                    "source": "kalshi",
+                })
+
+    return results
 
 
 @app.get("/bl-comparison")
@@ -162,19 +217,22 @@ async def bl_comparison(
                 polymarket_prob = float(m.get("lastTradePrice", 0))
                 polymarket_market = m.get("question")
         else:
-            # Auto-search for matching market
-            query = f"{asset} {int(threshold)}"
-            async with httpx.AsyncClient(timeout=10) as client:
+            # Gamma API ignores text search; fetch top markets and filter locally
+            terms = [t.lower() for t in f"{asset} {int(threshold)}".split() if t]
+            async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
                     f"{POLYMARKET_GAMMA}/markets",
-                    params={"search": query, "limit": 5, "active": True},
+                    params={"limit": 300, "active": True, "order": "volume24hr", "ascending": False},
                 )
             if resp.status_code == 200:
-                markets = resp.json()
-                if isinstance(markets, list) and markets:
-                    m = markets[0]
-                    polymarket_prob = float(m.get("lastTradePrice", 0))
-                    polymarket_market = m.get("question")
+                raw = resp.json()
+                all_markets = raw if isinstance(raw, list) else raw.get("markets", [])
+                for m in all_markets:
+                    q = (m.get("question") or "").lower()
+                    if all(t in q for t in terms):
+                        polymarket_prob = float(m.get("lastTradePrice") or 0)
+                        polymarket_market = m.get("question")
+                        break
     except Exception as e:
         errors["polymarket"] = str(e)
 
@@ -258,6 +316,68 @@ async def bl_comparison(
     }
 
 
+@app.get("/markets/polymarket/{market_id}/history")
+async def polymarket_history(market_id: str, interval: str = "1m"):
+    # Resolve conditionId → YES token ID directly via CLOB API (no Gamma roundtrip)
+    async with httpx.AsyncClient(timeout=10) as client:
+        clob_resp = await client.get(f"https://clob.polymarket.com/markets/{market_id}")
+    if clob_resp.status_code != 200:
+        raise HTTPException(502, f"CLOB market lookup error: {clob_resp.status_code}")
+    clob_market = clob_resp.json()
+
+    tokens = clob_market.get("tokens") or []
+    yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), tokens[0] if tokens else None)
+    if not yes_token:
+        raise HTTPException(404, "No YES token found for this market")
+    token_id = yes_token["token_id"]
+
+    # Fetch price history from CLOB API
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            "https://clob.polymarket.com/prices-history",
+            params={"market": token_id, "interval": interval, "fidelity": 60},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Polymarket CLOB history error: {resp.status_code}")
+
+    data = resp.json()
+    return {
+        "question": clob_market.get("question"),
+        "current_price": float(yes_token.get("price") or 0),
+        "end_date": clob_market.get("end_date_iso"),
+        "history": [{"t": pt["t"], "p": pt["p"]} for pt in data.get("history", [])],
+    }
+
+
+@app.get("/correlate")
+async def correlate_markets(market_a: str = Query(...), market_b: str = Query(...)):
+    """Fetch daily price histories for two Polymarket markets and run the full correlation pipeline."""
+
+    async def fetch_history(condition_id: str) -> list[dict]:
+        async with httpx.AsyncClient(timeout=10) as client:
+            clob_resp = await client.get(f"https://clob.polymarket.com/markets/{condition_id}")
+        if clob_resp.status_code != 200:
+            raise HTTPException(502, f"CLOB lookup failed for {condition_id}: {clob_resp.status_code}")
+        tokens = clob_resp.json().get("tokens") or []
+        yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), tokens[0] if tokens else None)
+        if not yes_token:
+            raise HTTPException(404, f"No YES token for {condition_id}")
+        token_id = yes_token["token_id"]
+        async with httpx.AsyncClient(timeout=15) as client:
+            hist_resp = await client.get(
+                "https://clob.polymarket.com/prices-history",
+                params={"market": token_id, "interval": "max", "fidelity": 1440},
+            )
+        if hist_resp.status_code != 200:
+            raise HTTPException(502, f"CLOB history failed for {condition_id}: {hist_resp.status_code}")
+        return hist_resp.json().get("history", [])
+
+    hist_a, hist_b = await asyncio.gather(fetch_history(market_a), fetch_history(market_b))
+
+    result = correlate(market_a, market_b, hist_a, hist_b)
+    if result is None:
+        raise HTTPException(422, "Could not compute correlation — insufficient data")
+    return result
 @app.get("/vol-surface")
 async def vol_surface(asset: str = Query("BTC")):
     try:
