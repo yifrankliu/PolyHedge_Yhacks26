@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   AreaChart,
   Area,
@@ -9,7 +9,8 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts';
-import { blComparison, BLResponse } from '../api/client';
+import Plot from 'react-plotly.js';
+import { blComparison, getVolSurface, BLResponse, VolSurfaceResponse } from '../api/client';
 
 function ProbBar({
   label,
@@ -80,6 +81,11 @@ export default function BLComparison() {
   const [result, setResult] = useState<BLResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [surface, setSurface] = useState<VolSurfaceResponse | null>(null);
+
+  useEffect(() => {
+    getVolSurface(asset).then(setSurface).catch(() => setSurface(null));
+  }, [asset]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,6 +273,46 @@ export default function BLComparison() {
                   <p className="text-xs text-gray-600 mt-2 text-center">
                     Area to the right of threshold = Deribit-implied probability
                   </p>
+                </div>
+              )}
+
+              {/* 3D Volatility Surface */}
+              {surface && surface.surface.length > 0 && (
+                <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">
+                    Implied Volatility Surface — {asset}
+                  </h3>
+                  <Plot
+                    data={[{
+                      type: 'scatter3d',
+                      mode: 'markers',
+                      x: surface.surface.map(r => r.strike),
+                      y: surface.surface.map(r => r.dte),
+                      z: surface.surface.map(r => r.iv),
+                      marker: {
+                        size: 2.5,
+                        color: surface.surface.map(r => r.iv),
+                        colorscale: 'Viridis',
+                        showscale: true,
+                        colorbar: { title: 'IV %', tickfont: { color: '#9ca3af' }, titlefont: { color: '#9ca3af' } },
+                      },
+                    } as any]}
+                    layout={{
+                      paper_bgcolor: 'transparent',
+                      plot_bgcolor: 'transparent',
+                      scene: {
+                        xaxis: { title: { text: 'Strike ($)', font: { color: '#9ca3af' } }, color: '#9ca3af', gridcolor: '#374151' },
+                        yaxis: { title: { text: 'Days to Expiry', font: { color: '#9ca3af' } }, color: '#9ca3af', gridcolor: '#374151' },
+                        zaxis: { title: { text: 'IV (%)', font: { color: '#9ca3af' } }, color: '#9ca3af', gridcolor: '#374151' },
+                        bgcolor: 'transparent',
+                      },
+                      font: { color: '#9ca3af' },
+                      margin: { l: 0, r: 0, t: 0, b: 0 },
+                      height: 420,
+                    }}
+                    config={{ responsive: true, displayModeBar: false }}
+                    style={{ width: '100%' }}
+                  />
                 </div>
               )}
 

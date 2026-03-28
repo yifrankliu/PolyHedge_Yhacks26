@@ -128,3 +128,18 @@ export const blComparison = (params: {
   polymarket_id?: string;
   kalshi_ticker?: string;
 }) => api.get<BLResponse>('/bl-comparison', { params }).then((r) => r.data);
+
+export interface VolSurfaceRow {
+  expiry: string;
+  dte: number;
+  strike: number;
+  iv: number;
+}
+
+export interface VolSurfaceResponse {
+  expiries: string[];
+  surface: VolSurfaceRow[];
+}
+
+export const getVolSurface = (asset: string) =>
+  api.get<VolSurfaceResponse>('/vol-surface', { params: { asset } }).then((r) => r.data);
