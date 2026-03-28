@@ -2,14 +2,12 @@ import React, { useState } from 'react';
 import {
   ComposedChart,
   Area,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ReferenceLine,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import { whatif, searchPolymarket, searchKalshi, WhatIfResponse, Market } from '../api/client';
 
