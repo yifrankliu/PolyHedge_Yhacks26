@@ -42,6 +42,7 @@ export const whatif = (req: WhatIfRequest) =>
 
 export const searchPolymarket = (search: string) =>
   api.get<Market[]>('/markets/polymarket', { params: { search } }).then((r) => r.data);
+  console.log("executed searchPolymarket");
 
 export const searchKalshi = (search: string) =>
   api.get<Market[]>('/markets/kalshi', { params: { search } }).then((r) => r.data);
@@ -70,6 +71,21 @@ export interface BLResponse {
   divergences: Divergence[];
   errors: Record<string, string>;
 }
+
+export interface PricePoint {
+  t: number;
+  p: number;
+}
+
+export interface MarketHistory {
+  question: string;
+  current_price: number;
+  end_date: string | null;
+  history: PricePoint[];
+}
+
+export const getPolymarketHistory = (marketId: string, interval = '1m') =>
+  api.get<MarketHistory>(`/markets/polymarket/${marketId}/history`, { params: { interval } }).then(r => r.data);
 
 export const blComparison = (params: {
   asset: string;
