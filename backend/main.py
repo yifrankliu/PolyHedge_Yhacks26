@@ -17,14 +17,9 @@ load_dotenv()
 
 app = FastAPI(title="Prediction Market Analytics API")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    os.getenv("FRONTEND_URL", ""),
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in ALLOWED_ORIGINS if o],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
