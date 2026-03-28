@@ -119,18 +119,19 @@ def run_bl(
     Run Breeden-Litzenberger pipeline.
     Returns: prob, rnd_curve [{strike, density}], strikes used, any warnings.
     """
-    # Use OTM options for cleaner IV smile (standard practice)
+    # Prefer OTM options for cleaner IV smile; fall back to all options if too few
     otm = [
         o for o in options
         if (o["option_type"] == "C" and o["strike"] >= spot * 0.8) or
            (o["option_type"] == "P" and o["strike"] <= spot * 1.2)
     ]
+    working_set = otm if len(otm) >= 5 else options
 
-    if len(otm) < 5:
-        raise ValueError(f"Not enough OTM options ({len(otm)}) to fit IV smile.")
+    if len(working_set) < 5:
+        raise ValueError(f"Not enough options ({len(options)}) for expiry — try a different date.")
 
-    strikes_raw = np.array([o["strike"] for o in otm])
-    ivs_raw = np.array([o["iv"] for o in otm])
+    strikes_raw = np.array([o["strike"] for o in working_set])
+    ivs_raw = np.array([o["iv"] for o in working_set])
 
     # Deduplicate: if both C and P at same strike, average IVs
     unique_strikes, indices = np.unique(strikes_raw, return_inverse=True)
