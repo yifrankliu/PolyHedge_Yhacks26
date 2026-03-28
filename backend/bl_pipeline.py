@@ -166,7 +166,7 @@ def run_bl(
 
     # Clip negatives (numerical noise) and normalize
     rnd = np.clip(rnd, 0, None)
-    total = np.trapz(rnd, K_grid)
+    total = np.trapezoid(rnd, K_grid)
     if total < 1e-10:
         raise ValueError("RND normalization failed (near-zero integral).")
     rnd_normalized = rnd / total
@@ -178,7 +178,7 @@ def run_bl(
     elif mask.all():
         prob = 1.0
     else:
-        prob = float(np.trapz(rnd_normalized[mask], K_grid[mask]))
+        prob = float(np.trapezoid(rnd_normalized[mask], K_grid[mask]))
 
     # Return RND curve (sampled at ~100 points for frontend)
     sample_idx = np.linspace(0, n_grid - 1, min(100, n_grid), dtype=int)
