@@ -88,14 +88,14 @@ async def search_polymarket(search: str = Query(..., min_length=1)):
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
             f"{POLYMARKET_GAMMA}/markets",
-            params={"search": search, "limit": 10, "active": True},
+            params={"search": search, "limit": 10, "closed": False},
         )
     if resp.status_code != 200:
         raise HTTPException(502, f"Polymarket error: {resp.status_code}")
     markets = resp.json()
     return [
         {
-            "id": m.get("id"),
+            "id": m.get("conditionId") or str(m.get("id")),
             "question": m.get("question"),
             "price": float(m.get("lastTradePrice", 0)),
             "volume": m.get("volume"),
@@ -167,7 +167,7 @@ async def bl_comparison(
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
                     f"{POLYMARKET_GAMMA}/markets",
-                    params={"search": query, "limit": 5, "active": True},
+                    params={"search": query, "limit": 5, "closed": False},
                 )
             if resp.status_code == 200:
                 markets = resp.json()
@@ -255,6 +255,49 @@ async def bl_comparison(
         "strike_range": deribit_result["strike_range"] if deribit_result else [],
         "divergences": divergences,
         "errors": errors,
+    }
+
+
+@app.get("/markets/polymarket/{market_id}/history")
+async def polymarket_history(market_id: str, interval: str = "1m"):
+    # Fetch market details to get the CLOB token ID
+    # Use condition_ids param (more reliable than path-based integer id lookup)
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={"condition_ids": market_id, "limit": 1},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Polymarket market lookup error: {resp.status_code}")
+    raw = resp.json()
+    markets_list = raw if isinstance(raw, list) else raw.get("markets", [])
+    if not markets_list:
+        raise HTTPException(404, f"Market not found: {market_id}")
+    market = markets_list[0]
+
+    clob_token_ids = market.get("clobTokenIds")
+    if not clob_token_ids:
+        raise HTTPException(404, "No CLOB token IDs found for this market")
+    if isinstance(clob_token_ids, str):
+        import json as _json
+        clob_token_ids = _json.loads(clob_token_ids)
+    token_id = clob_token_ids[0]  # YES / first outcome token
+
+    # Fetch price history from CLOB API
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            "https://clob.polymarket.com/prices-history",
+            params={"market": token_id, "interval": interval, "fidelity": 60},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Polymarket CLOB error: {resp.status_code}")
+
+    data = resp.json()
+    return {
+        "question": market.get("question"),
+        "current_price": float(market.get("lastTradePrice", 0)),
+        "end_date": market.get("endDate"),
+        "history": [{"t": pt["t"], "p": pt["p"]} for pt in data.get("history", [])],
     }
 
 
