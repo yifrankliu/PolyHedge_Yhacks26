@@ -12,6 +12,7 @@ from kelly import (
     max_profit,
     breakeven_probability,
 )
+from bl_pipeline import bl_pipeline
 
 load_dotenv()
 
@@ -130,6 +131,131 @@ async def search_kalshi(search: str = Query(..., min_length=1)):
         }
         for m in data.get("markets", [])
     ]
+
+
+@app.get("/bl-comparison")
+async def bl_comparison(
+    asset: str = Query(..., description="BTC or ETH"),
+    threshold: float = Query(..., description="Price threshold in USD"),
+    expiry: str = Query(..., description="Expiry date YYYY-MM-DD"),
+    polymarket_id: str = Query(None, description="Optional Polymarket market ID"),
+    kalshi_ticker: str = Query(None, description="Optional Kalshi ticker"),
+):
+    errors = {}
+
+    # ── Deribit BL pipeline ───────────────────────────────────────────────────
+    deribit_result = None
+    try:
+        deribit_result = await bl_pipeline(asset, threshold, expiry)
+    except Exception as e:
+        errors["deribit"] = str(e)
+
+    # ── Polymarket probability ────────────────────────────────────────────────
+    polymarket_prob = None
+    polymarket_market = None
+    try:
+        if polymarket_id:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{POLYMARKET_GAMMA}/markets/{polymarket_id}")
+            if resp.status_code == 200:
+                m = resp.json()
+                polymarket_prob = float(m.get("lastTradePrice", 0))
+                polymarket_market = m.get("question")
+        else:
+            # Auto-search for matching market
+            query = f"{asset} {int(threshold)}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{POLYMARKET_GAMMA}/markets",
+                    params={"search": query, "limit": 5, "active": True},
+                )
+            if resp.status_code == 200:
+                markets = resp.json()
+                if isinstance(markets, list) and markets:
+                    m = markets[0]
+                    polymarket_prob = float(m.get("lastTradePrice", 0))
+                    polymarket_market = m.get("question")
+    except Exception as e:
+        errors["polymarket"] = str(e)
+
+    # ── Kalshi probability ────────────────────────────────────────────────────
+    kalshi_prob = None
+    kalshi_market = None
+    try:
+        headers = {}
+        if KALSHI_API_KEY:
+            headers["Authorization"] = f"Token {KALSHI_API_KEY}"
+        if kalshi_ticker:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{KALSHI_BASE}/markets/{kalshi_ticker}", headers=headers
+                )
+            if resp.status_code == 200:
+                m = resp.json().get("market", {})
+                last = m.get("last_price")
+                kalshi_prob = last / 100 if last else None
+                kalshi_market = m.get("title")
+        else:
+            query = f"{asset} {int(threshold)}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{KALSHI_BASE}/markets",
+                    params={"search": query, "limit": 5, "status": "open"},
+                    headers=headers,
+                )
+            if resp.status_code == 200:
+                markets = resp.json().get("markets", [])
+                if markets:
+                    m = markets[0]
+                    last = m.get("last_price")
+                    kalshi_prob = last / 100 if last else None
+                    kalshi_market = m.get("title")
+    except Exception as e:
+        errors["kalshi"] = str(e)
+
+    # ── Divergence signals ────────────────────────────────────────────────────
+    divergences = []
+    deribit_prob = deribit_result["prob"] if deribit_result else None
+
+    probs = {k: v for k, v in {
+        "Polymarket": polymarket_prob,
+        "Kalshi": kalshi_prob,
+        "Deribit": deribit_prob,
+    }.items() if v is not None}
+
+    if len(probs) >= 2:
+        vals = list(probs.values())
+        spread = max(vals) - min(vals)
+        if spread >= 0.10:
+            high = max(probs, key=probs.get)
+            low = min(probs, key=probs.get)
+            divergences.append({
+                "type": "large_spread",
+                "message": f"{high} ({probs[high]*100:.1f}%) is {spread*100:.1f}pp above {low} ({probs[low]*100:.1f}%)",
+                "severity": "high" if spread >= 0.15 else "medium",
+            })
+        if deribit_prob and polymarket_prob:
+            diff = polymarket_prob - deribit_prob
+            if diff > 0.05:
+                divergences.append({
+                    "type": "one_touch_premium",
+                    "message": f"Polymarket is {diff*100:.1f}pp above Deribit — consistent with one-touch vs European structure",
+                    "severity": "info",
+                })
+
+    return {
+        "deribit_prob": deribit_prob,
+        "polymarket_prob": polymarket_prob,
+        "kalshi_prob": kalshi_prob,
+        "polymarket_market": polymarket_market,
+        "kalshi_market": kalshi_market,
+        "rnd_curve": deribit_result["rnd_curve"] if deribit_result else [],
+        "spot": deribit_result["spot"] if deribit_result else None,
+        "strikes_used": deribit_result["strikes_used"] if deribit_result else 0,
+        "strike_range": deribit_result["strike_range"] if deribit_result else [],
+        "divergences": divergences,
+        "errors": errors,
+    }
 
 
 @app.get("/health")

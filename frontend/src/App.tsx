@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import WhatIfAnalyzer from './components/WhatIfAnalyzer';
+import BLComparison from './components/BLComparison';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'whatif', label: 'What-If Analyzer' },
-  { id: 'bl', label: 'Prob Comparison', disabled: true },
+  { id: 'bl', label: 'Prob Comparison' },
   { id: 'portfolio', label: 'Portfolio', disabled: true },
   { id: 'hedge', label: 'Hedge Scanner', disabled: true },
 ];
@@ -62,6 +63,7 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
         {activeTab === 'whatif' && <WhatIfAnalyzer />}
+        {activeTab === 'bl' && <BLComparison />}
       </main>
     </div>
   );

@@ -45,3 +45,36 @@ export const searchPolymarket = (search: string) =>
 
 export const searchKalshi = (search: string) =>
   api.get<Market[]>('/markets/kalshi', { params: { search } }).then((r) => r.data);
+
+export interface RndPoint {
+  strike: number;
+  density: number;
+}
+
+export interface Divergence {
+  type: string;
+  message: string;
+  severity: 'high' | 'medium' | 'info';
+}
+
+export interface BLResponse {
+  deribit_prob: number | null;
+  polymarket_prob: number | null;
+  kalshi_prob: number | null;
+  polymarket_market: string | null;
+  kalshi_market: string | null;
+  rnd_curve: RndPoint[];
+  spot: number | null;
+  strikes_used: number;
+  strike_range: number[];
+  divergences: Divergence[];
+  errors: Record<string, string>;
+}
+
+export const blComparison = (params: {
+  asset: string;
+  threshold: number;
+  expiry: string;
+  polymarket_id?: string;
+  kalshi_ticker?: string;
+}) => api.get<BLResponse>('/bl-comparison', { params }).then((r) => r.data);
