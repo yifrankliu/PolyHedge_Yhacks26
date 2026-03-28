@@ -105,6 +105,70 @@ async def fetch_options_for_expiry(asset: str, expiry_str: str) -> list[dict]:
     return sorted(results, key=lambda x: x["strike"])
 
 
+async def fetch_vol_surface(asset: str) -> dict:
+    """
+    Fetch full volatility surface across all active expiries.
+    Returns { expiries: [...], surface: [{expiry, dte, strike, iv}] }
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{DERIBIT_BASE}/get_book_summary_by_currency",
+            params={"currency": asset.upper(), "kind": "option"},
+        )
+    resp.raise_for_status()
+    summaries = resp.json()["result"]
+
+    rows = []
+    expiry_dates: dict[str, datetime] = {}
+
+    for s in summaries:
+        name = s.get("instrument_name", "")
+        parts = name.split("-")
+        if len(parts) != 4:
+            continue
+        mark_iv = s.get("mark_iv")
+        if mark_iv is None or mark_iv <= 0:
+            continue
+        try:
+            strike = float(parts[2])
+        except ValueError:
+            continue
+        expiry_str = parts[1]
+        option_type = parts[3]
+        # Only use calls for the surface (cleaner at OTM)
+        if option_type != "C":
+            continue
+
+        # Parse expiry to days-to-expiry
+        if expiry_str not in expiry_dates:
+            try:
+                # Handle both zero-padded and non-padded: "1APR26" and "26JUN26"
+                exp_dt = datetime.strptime(expiry_str, "%d%b%y")
+            except ValueError:
+                continue
+            expiry_dates[expiry_str] = exp_dt
+
+        rows.append({
+            "expiry": expiry_str,
+            "strike": strike,
+            "iv": round(mark_iv, 2),
+        })
+
+    now = datetime.utcnow()
+    # Attach DTE and filter to reasonable strikes (0.4x to 2.5x spot not needed here)
+    expiries_sorted = sorted(expiry_dates.keys(), key=lambda e: expiry_dates[e])
+
+    surface = []
+    for row in rows:
+        dte = max((expiry_dates[row["expiry"]] - now).days, 1)
+        surface.append({**row, "dte": dte})
+
+    return {
+        "expiries": expiries_sorted,
+        "surface": surface,
+    }
+
+
 # ── BL Core ────────────────────────────────────────────────────────────────────
 
 def run_bl(

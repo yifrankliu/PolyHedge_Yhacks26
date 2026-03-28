@@ -12,7 +12,7 @@ from kelly import (
     max_profit,
     breakeven_probability,
 )
-from bl_pipeline import bl_pipeline
+from bl_pipeline import bl_pipeline, fetch_vol_surface
 
 load_dotenv()
 
@@ -256,6 +256,14 @@ async def bl_comparison(
         "divergences": divergences,
         "errors": errors,
     }
+
+
+@app.get("/vol-surface")
+async def vol_surface(asset: str = Query("BTC")):
+    try:
+        return await fetch_vol_surface(asset)
+    except Exception as e:
+        raise HTTPException(502, str(e))
 
 
 @app.get("/health")
