@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LineChart,
   Line,
@@ -122,15 +122,22 @@ interface Props {
   positions: PortfolioPosition[];
   recommendations: HedgeRecommendation[];
   onTestStrategy?: (pos: PortfolioPosition, hedge: HedgeRecommendation) => void;
+  demoMode?: boolean;
 }
 
-export default function StrategyBuilder({ positions, recommendations, onTestStrategy }: Props) {
+export default function StrategyBuilder({ positions, recommendations, onTestStrategy, demoMode }: Props) {
   const pos = positions[0] ?? null;
 
   const [strategies, setStrategies] = useState<Strategy[]>([
     { id: 'S1', label: 'Strategy 1', hedges: [] },
   ]);
   const [activeId, setActiveId] = useState('S1');
+
+  useEffect(() => {
+    if (demoMode && recommendations.length > 0) {
+      setStrategies([{ id: 'S1', label: 'Strategy 1', hedges: [recommendations[0]] }]);
+    }
+  }, [demoMode, recommendations]);
   const [backtestHedgeId, setBacktestHedgeId] = useState<string | null>(null);
 
   const activeStrategy = strategies.find(s => s.id === activeId) ?? strategies[0];
@@ -284,6 +291,13 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       <Header />
+
+      {demoMode && (
+        <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
+          <span className="text-amber-600 text-xs">ETH $4k hedge pre-added to Strategy 1 · Select it, view the P&amp;L curve, then click Test Strategy →</span>
+        </div>
+      )}
 
       {/* Position summary bar */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 px-5 py-3 flex items-center gap-4">

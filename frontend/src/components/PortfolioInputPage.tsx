@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DEMO_POSITION } from '../demo/demoData';
 import {
   Market,
   getPolymarketHistory,
@@ -138,7 +139,7 @@ const toMillis = (t: number) => (t < 1_000_000_000_000 ? t * 1000 : t);
 const formatTime = (t: number) =>
   new Date(toMillis(t)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (positions: PortfolioPosition[]) => void }) {
+export default function PortfolioInputPage({ onScanHedges, demoMode }: { onScanHedges?: (positions: PortfolioPosition[]) => void; demoMode?: boolean }) {
   const [positionInputMode, setPositionInputMode] = useState<MarketInputMode>('search');
   const [positionMarket, setPositionMarket] = useState<{
     market_id: string;
@@ -157,6 +158,10 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   const [stakeUsd, setStakeUsd] = useState('');
   const [notes, setNotes] = useState('');
   const [positions, setPositions] = useState<Position[]>([]);
+
+  useEffect(() => {
+    if (demoMode) setPositions([DEMO_POSITION]);
+  }, [demoMode]);
 
   const [goalHedge, setGoalHedge] = useState(true);
   const [goalArb, setGoalArb] = useState(false);
@@ -317,6 +322,16 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
           Add the exact markets and positions you hold or are considering.
         </p>
       </div>
+
+      {demoMode && (
+        <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-3 flex items-start gap-3">
+          <span className="text-amber-400 text-sm mt-0.5 flex-shrink-0">★</span>
+          <div>
+            <p className="text-amber-300 text-xs font-medium">Demo Mode — pre-loaded position</p>
+            <p className="text-amber-600 text-xs mt-0.5">BTC $100k YES @ 65¢ / $500 stake. Click <span className="text-amber-400">Scan for Hedges →</span> to continue the pipeline.</p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
         <div className="xl:col-span-3 space-y-5">

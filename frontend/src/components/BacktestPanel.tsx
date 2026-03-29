@@ -5,6 +5,7 @@ import {
   ScatterChart, Scatter, ZAxis, LineChart, Bar,
 } from 'recharts';
 import { runBacktest, BacktestResponse, ScenarioItem } from '../api/client';
+import { generateDemoBacktestData } from '../demo/demoData';
 
 // ── Plotly lazy-loaded on demand (3.5 MB) ────────────────────────────────────
 const Plot = lazy(() => import('react-plotly.js'));
@@ -19,6 +20,7 @@ interface Props {
   hedgeDirection: 'YES' | 'NO';
   hedgeSize: number;
   questionB: string;
+  demoMode?: boolean;
 }
 
 // ── Formatting ─────────────────────────────────────────────────────────────────
@@ -129,7 +131,7 @@ function EffDot(props: any) {
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function BacktestPanel({
   marketAId, marketBId, direction, entryPrice,
-  positionSize, hedgeDirection, hedgeSize, questionB,
+  positionSize, hedgeDirection, hedgeSize, questionB, demoMode,
 }: Props) {
   const [result, setResult] = useState<BacktestResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -137,6 +139,13 @@ export default function BacktestPanel({
   const [show3D, setShow3D] = useState(false);
 
   useEffect(() => {
+    if (demoMode) {
+      setResult(generateDemoBacktestData());
+      setLoading(false);
+      setError('');
+      setShow3D(false);
+      return;
+    }
     setLoading(true);
     setError('');
     setResult(null);
@@ -158,7 +167,7 @@ export default function BacktestPanel({
         setError(detail);
       })
       .finally(() => setLoading(false));
-  }, [marketAId, marketBId, direction, entryPrice, positionSize, hedgeDirection, hedgeSize]);
+  }, [marketAId, marketBId, direction, entryPrice, positionSize, hedgeDirection, hedgeSize, demoMode]);
 
   // ── Fan chart data ─────────────────────────────────────────────────────────
   const fanData = useMemo(() => {
@@ -255,6 +264,13 @@ export default function BacktestPanel({
           </div>
         ))}
       </div>
+
+      {demoMode && (
+        <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
+          <span className="text-amber-600 text-xs">Synthetic Monte Carlo — BTC YES 65¢ $500 hedged with ETH YES 55¢ $145</span>
+        </div>
+      )}
 
       {/* Warnings */}
       {meta.warnings.length > 0 && (

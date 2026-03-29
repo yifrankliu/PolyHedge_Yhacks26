@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { DEMO_CORRELATION, DEMO_MARKET_A, DEMO_MARKET_B } from '../demo/demoData';
 import {
   LineChart,
   Line,
@@ -396,7 +397,7 @@ function LogicalCorrelationPanel({
   );
 }
 
-export default function MarketCompare({ initialMarketA, initialMarketB }: { initialMarketA?: Market; initialMarketB?: Market }) {
+export default function MarketCompare({ initialMarketA, initialMarketB, demoMode }: { initialMarketA?: Market; initialMarketB?: Market; demoMode?: boolean }) {
   const [marketA, setMarketA] = useState<Market | null>(null);
   const [marketB, setMarketB] = useState<Market | null>(null);
   const [historyA, setHistoryA] = useState<MarketHistory | null>(null);
@@ -415,6 +416,8 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
 
   useEffect(() => {
     if (!marketA?.id || !marketB?.id) { setCorrelation(null); return; }
+    // Skip API call for demo markets — correlation is pre-loaded
+    if (marketA.id.startsWith('demo-') || marketB.id.startsWith('demo-')) return;
     setCorrLoading(true);
     setCorrelation(null);
     correlateMarkets(marketA.id, marketB.id)
@@ -426,6 +429,8 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
   const fetchHistory = useCallback(
     async (market: Market, slot: 'A' | 'B', iv: string) => {
       if (!market.id) return;
+      // Skip history fetch for demo markets (fake IDs would 404)
+      if (market.id.startsWith('demo-')) return;
       const setLoading = slot === 'A' ? setLoadingA : setLoadingB;
       const setHistory = slot === 'A' ? setHistoryA : setHistoryB;
       const setError   = slot === 'A' ? setErrorA   : setErrorB;
@@ -462,6 +467,16 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
     fetchHistory(m, 'B', interval);
   };
 
+  // Pre-load demo data when demo mode is enabled
+  useEffect(() => {
+    if (demoMode) {
+      setMarketA(DEMO_MARKET_A);
+      setMarketB(DEMO_MARKET_B);
+      setCorrelation(DEMO_CORRELATION);
+      setCorrLoading(false);
+    }
+  }, [demoMode]);
+
   // Pre-populate markets when navigating from Correlation Scanner
   useEffect(() => {
     if (initialMarketA?.id) handleSelectA(initialMarketA);
@@ -494,6 +509,13 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
           Pick any two Polymarket markets and compare their price histories.
         </p>
       </div>
+
+      {demoMode && (
+        <div className="mb-5 bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
+          <span className="text-amber-600 text-xs">Pre-loaded: BTC $100k vs ETH $4k correlation analysis (r = +0.831, A leads B by 1 day)</span>
+        </div>
+      )}
 
       {/* Market pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

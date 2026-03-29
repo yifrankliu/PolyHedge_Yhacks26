@@ -6,12 +6,13 @@ import BacktestPanel from './BacktestPanel';
 interface Props {
   position: PortfolioPosition | null;
   hedge: HedgeRecommendation | null;
+  demoMode?: boolean;
 }
 
 function clamp(p: number) { return Math.max(0.001, Math.min(0.999, p)); }
 const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
-export default function StressTestDashboard({ position, hedge }: Props) {
+export default function StressTestDashboard({ position, hedge, demoMode }: Props) {
   if (!position || !hedge) {
     return (
       <div className="max-w-6xl mx-auto">
@@ -42,6 +43,13 @@ export default function StressTestDashboard({ position, hedge }: Props) {
           Monte Carlo simulation, scenario replay, and walk-forward OOS validation for a position + hedge pair.
         </p>
       </div>
+
+      {demoMode && (
+        <div className="mb-4 bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
+          <span className="text-amber-600 text-xs">Pre-generated stress test for BTC $100k + ETH hedge</span>
+        </div>
+      )}
 
       {/* Strategy summary card */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5 mb-6">
@@ -88,6 +96,7 @@ export default function StressTestDashboard({ position, hedge }: Props) {
         hedgeDirection={hedge.hedge_direction}
         hedgeSize={hedge.recommended_size}
         questionB={hedge.question}
+        demoMode={demoMode}
       />
     </div>
   );

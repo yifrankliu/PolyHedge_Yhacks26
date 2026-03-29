@@ -7,6 +7,7 @@ import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInp
 import HedgeScanner from './components/HedgeScanner';
 import StrategyBuilder from './components/StrategyBuilder';
 import StressTestDashboard from './components/StressTestDashboard';
+import { DEMO_POSITION, DEMO_RECOMMENDATIONS, DEMO_MARKET_A, DEMO_MARKET_B } from './demo/demoData';
 
 // ── Tab icons (16×16 stroke SVGs) ─────────────────────────────────────────────
 
@@ -89,6 +90,27 @@ export default function App() {
   const [stressTarget, setStressTarget]               = useState<{ position: PortfolioPosition; hedge: HedgeRecommendation } | null>(null);
   const [pendingMarketA, setPendingMarketA]           = useState<Market | null>(null);
   const [pendingMarketB, setPendingMarketB]           = useState<Market | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+
+  const toggleDemoMode = () => {
+    const next = !demoMode;
+    setDemoMode(next);
+    if (next) {
+      setHedgePositions([DEMO_POSITION]);
+      setHedgeRecommendations(DEMO_RECOMMENDATIONS);
+      setStrategyPositions([DEMO_POSITION]);
+      setStressTarget({ position: DEMO_POSITION, hedge: DEMO_RECOMMENDATIONS[0] });
+      setPendingMarketA(DEMO_MARKET_A);
+      setPendingMarketB(DEMO_MARKET_B);
+    } else {
+      setHedgePositions([]);
+      setHedgeRecommendations([]);
+      setStrategyPositions([]);
+      setStressTarget(null);
+      setPendingMarketA(null);
+      setPendingMarketB(null);
+    }
+  };
 
   const handleCompare = (target: Market, correlated: Market) => {
     setPendingMarketA(target);
@@ -158,7 +180,19 @@ export default function App() {
         </nav>
 
         {/* Footer status */}
-        <div className="px-5 py-4 border-t border-zinc-800/60">
+        <div className="px-5 py-4 border-t border-zinc-800/60 space-y-3">
+          <button
+            onClick={toggleDemoMode}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+              demoMode
+                ? 'bg-amber-900/40 border-amber-600/60 text-amber-300'
+                : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${demoMode ? 'bg-amber-400' : 'bg-zinc-600'}`} />
+            <span>{demoMode ? 'Demo Mode ON' : 'Demo Mode'}</span>
+            {demoMode && <span className="ml-auto text-[10px] text-amber-500">BTC $100k</span>}
+          </button>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
@@ -172,11 +206,12 @@ export default function App() {
       {/* ── Main content ────────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-auto">
         <div className="max-w-6xl mx-auto px-8 py-8">
-          {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
+          {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} demoMode={demoMode} />}
           {activeTab === 'compare' && (
             <MarketCompare
               initialMarketA={pendingMarketA ?? undefined}
               initialMarketB={pendingMarketB ?? undefined}
+              demoMode={demoMode}
             />
           )}
           <div style={{ display: activeTab === 'scanner'  ? 'block' : 'none' }}>
@@ -187,6 +222,7 @@ export default function App() {
               initialPositions={hedgePositions}
               onRecommendationsUpdate={handleRecommendationsUpdate}
               onNavigateToStrategy={() => setActiveTab('strategy')}
+              demoMode={demoMode}
             />
           </div>
           <div style={{ display: activeTab === 'strategy' ? 'block' : 'none' }}>
@@ -194,12 +230,14 @@ export default function App() {
               positions={strategyPositions}
               recommendations={hedgeRecommendations}
               onTestStrategy={handleTestStrategy}
+              demoMode={demoMode}
             />
           </div>
           <div style={{ display: activeTab === 'stress'   ? 'block' : 'none' }}>
             <StressTestDashboard
               position={stressTarget?.position ?? null}
               hedge={stressTarget?.hedge ?? null}
+              demoMode={demoMode}
             />
           </div>
         </div>

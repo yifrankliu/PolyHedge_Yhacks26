@@ -3,6 +3,7 @@ import {
   HedgeRecommendation,
   FailedHedgeCandidate,
 } from '../api/client';
+import { DEMO_RECOMMENDATIONS, DEMO_FAILED_CANDIDATES } from '../demo/demoData';
 import { PortfolioPosition } from './PortfolioInputPage';
 
 const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -255,10 +256,12 @@ export default function HedgeScanner({
   initialPositions = [],
   onRecommendationsUpdate,
   onNavigateToStrategy,
+  demoMode,
 }: {
   initialPositions?: PortfolioPosition[];
   onRecommendationsUpdate?: (recs: HedgeRecommendation[], pos: PortfolioPosition) => void;
   onNavigateToStrategy?: () => void;
+  demoMode?: boolean;
 }) {
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
@@ -272,10 +275,48 @@ export default function HedgeScanner({
   const [minSharedDays, setMinSharedDays] = useState(DEFAULT_MIN_SHARED_DAYS);
   const [topN, setTopN] = useState(DEFAULT_TOP_N);
   const esRef = useRef<EventSource | null>(null);
+  const demoTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const stopScan = () => {
     esRef.current?.close();
     setScanning(false);
+  };
+
+  const startDemoScan = () => {
+    demoTimers.current.forEach(clearTimeout);
+    demoTimers.current = [];
+    setScanning(true);
+    setDone(false);
+    setRecommendations([]);
+    setFailedCandidates([]);
+    setScanned(0);
+    setFoundCount(0);
+    setError('');
+    const TOTAL = 75;
+    setTotal(TOTAL);
+    DEMO_RECOMMENDATIONS.forEach((rec, idx) => {
+      const t = setTimeout(() => {
+        setRecommendations(prev => {
+          const next = [...prev, rec].sort(
+            (a, b) => Math.abs(b.correlation) * b.hedge_confidence - Math.abs(a.correlation) * a.hedge_confidence
+          );
+          onRecommendationsUpdate?.(next, initialPositions[0]);
+          return next;
+        });
+        setFoundCount(idx + 1);
+        setScanned(Math.min(TOTAL, Math.round(((idx + 1) / DEMO_RECOMMENDATIONS.length) * TOTAL)));
+      }, 500 + idx * 380);
+      demoTimers.current.push(t);
+    });
+    const doneTimer = setTimeout(() => {
+      setScanned(TOTAL);
+      setFoundCount(DEMO_RECOMMENDATIONS.length);
+      setFailedCandidates(DEMO_FAILED_CANDIDATES.slice(0, 3));
+      setDone(true);
+      setScanning(false);
+      onRecommendationsUpdate?.(DEMO_RECOMMENDATIONS, initialPositions[0]);
+    }, 500 + DEMO_RECOMMENDATIONS.length * 380 + 600);
+    demoTimers.current.push(doneTimer);
   };
 
   const scanPosition = (pos: PortfolioPosition) => {
@@ -349,6 +390,13 @@ export default function HedgeScanner({
         </p>
       </div>
 
+      {demoMode && (
+        <div className="mb-4 bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
+          <span className="text-amber-600 text-xs">Pre-loaded BTC $100k scenario · Click Demo Scan to animate 5 hedge candidates</span>
+        </div>
+      )}
+
       {initialPositions.length === 0 ? (
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex flex-col items-center justify-center h-48 gap-2">
           <p className="text-zinc-500 text-sm">No positions to scan.</p>
@@ -413,14 +461,14 @@ export default function HedgeScanner({
 
                   {/* Scan button */}
                   <button
-                    onClick={() => scanning ? stopScan() : scanPosition(pos)}
+                    onClick={() => scanning ? stopScan() : (demoMode ? startDemoScan() : scanPosition(pos))}
                     className={`shrink-0 text-white px-4 h-[38px] rounded-lg text-sm font-medium whitespace-nowrap flex items-center transition-colors ${
                       scanning
                         ? 'bg-red-700 hover:bg-red-600'
                         : 'bg-indigo-700 hover:bg-indigo-600'
                     }`}
                   >
-                    {scanning ? 'Stop' : done ? 'Rescan' : 'Scan'}
+                    {scanning ? 'Stop' : done ? 'Rescan' : demoMode ? 'Demo Scan' : 'Scan'}
                   </button>
                 </div>
               ))}
