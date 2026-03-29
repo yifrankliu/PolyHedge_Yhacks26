@@ -1,21 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Market,
+  MarketHistory,
   getPolymarketHistory,
   getKalshiMarket,
   getPolymarketMarket,
-  searchKalshi,
-  searchPolymarket,
 } from '../api/client';
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import MarketSearchWidget from './MarketSearchWidget';
+import PriceChart from './PriceChart';
 
 type Source = 'polymarket' | 'kalshi';
 type Side = 'YES' | 'NO';
@@ -36,97 +28,6 @@ export type PortfolioPosition = {
 
 type Position = PortfolioPosition;
 
-function MarketLookup({
-  title,
-  hint,
-  onSelect,
-}: {
-  title: string;
-  hint: string;
-  onSelect: (market: Market, source: Source) => void;
-}) {
-  const [source, setSource] = useState<Source>('polymarket');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const runSearch = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const fn = source === 'polymarket' ? searchPolymarket : searchKalshi;
-      const data = await fn(query.trim());
-      setResults(data.slice(0, 8));
-      if (!data.length) {
-        setError('No markets found for that query.');
-      }
-    } catch {
-      setError('Unable to search markets right now.');
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-      <p className="text-sm font-semibold text-gray-200">{title}</p>
-      <p className="text-xs text-gray-500 mt-1 mb-3">{hint}</p>
-
-      <div className="flex gap-2">
-        <select
-          value={source}
-          onChange={(e) => setSource(e.target.value as Source)}
-          className="bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600"
-        >
-          <option value="polymarket">Polymarket</option>
-          <option value="kalshi">Kalshi</option>
-        </select>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-          placeholder="Search market by keyword..."
-          className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
-        />
-        <button
-          onClick={runSearch}
-          disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-        >
-          {loading ? '...' : 'Search'}
-        </button>
-      </div>
-
-      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
-
-      {results.length > 0 && (
-        <div className="mt-3 bg-gray-800 rounded-lg border border-gray-700 max-h-56 overflow-y-auto">
-          {results.map((market) => (
-            <button
-              key={market.id}
-              onClick={() => {
-                onSelect(market, source);
-                setResults([]);
-                setQuery(market.question);
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
-            >
-              <p className="text-sm text-white truncate">{market.question}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {market.price != null ? `${(market.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-                {market.end_date ? new Date(market.end_date).toLocaleDateString() : 'no date'}
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
   const p = entryPriceCents / 100;
   if (p <= 0) return 0;
@@ -134,9 +35,6 @@ const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
 };
 
 const formatCents = (value: number) => value.toFixed(1);
-const toMillis = (t: number) => (t < 1_000_000_000_000 ? t * 1000 : t);
-const formatTime = (t: number) =>
-  new Date(toMillis(t)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (positions: PortfolioPosition[]) => void }) {
   const [positionInputMode, setPositionInputMode] = useState<MarketInputMode>('search');
@@ -171,9 +69,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   const [graphInterval, setGraphInterval] = useState<'1m' | '1w' | 'max'>('1w');
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState('');
-  const [graphSeries, setGraphSeries] = useState<Array<{ t: number; p: number }>>([]);
-  const [graphCurrentPrice, setGraphCurrentPrice] = useState<number | null>(null);
-  const [graphNormalized, setGraphNormalized] = useState(false);
+  const [graphHistory, setGraphHistory] = useState<MarketHistory | null>(null);
 
   const liveEntryPriceCents = useMemo(() => {
     if (!positionMarket || positionMarket.market_price_cents == null) return null;
@@ -195,14 +91,14 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   useEffect(() => {
     if (!graphCandidates.length) {
       setGraphMarketId('');
-      setGraphSeries([]);
-      setGraphCurrentPrice(null);
+      setGraphHistory(null);
       setGraphError('');
       return;
     }
     const stillValid = graphCandidates.some((candidate) => candidate.id === graphMarketId);
     if (!graphMarketId || !stillValid) {
       setGraphMarketId(graphCandidates[0].id);
+      setGraphHistory(null);
     }
   }, [graphCandidates, graphMarketId]);
 
@@ -213,18 +109,9 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
       setGraphError('');
       try {
         const res = await getPolymarketHistory(graphMarketId, graphInterval);
-        const points = (res.history || [])
-          .map((point) => ({ t: Number(point.t), p: Number(point.p) * 100 }))
-          .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p));
-        setGraphSeries(points);
-        setGraphCurrentPrice(
-          res.current_price != null && Number.isFinite(Number(res.current_price))
-            ? Number(res.current_price) * 100
-            : null,
-        );
+        setGraphHistory(res);
       } catch {
-        setGraphSeries([]);
-        setGraphCurrentPrice(null);
+        setGraphHistory(null);
         setGraphError('Could not load market history.');
       } finally {
         setGraphLoading(false);
@@ -342,10 +229,21 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             </div>
 
             {positionInputMode === 'search' ? (
-              <MarketLookup
-                title="Find Position Market"
-                hint="Search and select the exact market for this position."
-                onSelect={(market, source) => applySelectedMarket(market, source)}
+              <MarketSearchWidget
+                label="Find Position Market"
+                selected={positionMarket ? {
+                  id: positionMarket.market_id,
+                  question: positionMarket.question,
+                  price: positionMarket.market_price_cents != null ? positionMarket.market_price_cents / 100 : null,
+                  volume: null,
+                  end_date: null,
+                  source: positionMarket.source,
+                } : null}
+                onSelect={(m) => {
+                  if (!m.id) { setPositionMarket(null); return; }
+                  applySelectedMarket(m, m.source as Source);
+                }}
+                placeholder="Search or paste a Polymarket URL..."
               />
             ) : (
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-3">
@@ -386,7 +284,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               </div>
             )}
 
-            {positionMarket ? (
+            {positionInputMode === 'manual_id' && (positionMarket ? (
               <div className="text-xs bg-gray-800 border border-gray-600 rounded p-2 text-gray-300 flex justify-between items-center gap-3">
                 <div>
                   Selected market: <span className="text-white">{positionMarket.question}</span>
@@ -403,7 +301,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded p-2">
                 Choose a market first. Position details appear afterward.
               </p>
-            )}
+            ))}
 
             {positionMarket && (
               <>
@@ -635,109 +533,47 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             )}
           </div>
 
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-sm font-semibold text-gray-200">Market Graph</p>
-              {graphCandidates.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <select
-                    value={graphMarketId}
-                    onChange={(e) => setGraphMarketId(e.target.value)}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 max-w-[220px]"
-                  >
-                    {graphCandidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {candidate.question}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={graphInterval}
-                    onChange={(e) => setGraphInterval(e.target.value as '1m' | '1w' | 'max')}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600"
-                  >
-                    <option value="1m">1m</option>
-                    <option value="1w">1w</option>
-                    <option value="max">max</option>
-                  </select>
+          <div className="space-y-3">
+            {graphCandidates.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={graphMarketId}
+                  onChange={(e) => setGraphMarketId(e.target.value)}
+                  className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 flex-1 min-w-0"
+                >
+                  {graphCandidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.question}
+                    </option>
+                  ))}
+                </select>
+                {(['1w', '1m', 'max'] as const).map((iv) => (
                   <button
-                    onClick={() => setGraphNormalized((n) => !n)}
-                    className={`px-2 py-1.5 rounded text-xs border transition-colors ${
-                      graphNormalized
-                        ? 'bg-indigo-700 text-white border-indigo-500'
-                        : 'bg-gray-800 text-gray-400 border-gray-600 hover:text-gray-200'
+                    key={iv}
+                    onClick={() => setGraphInterval(iv)}
+                    className={`px-2.5 py-1.5 rounded text-xs font-medium border transition-colors ${
+                      graphInterval === iv
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-gray-200'
                     }`}
                   >
-                    Δ Norm
+                    {iv.toUpperCase()}
                   </button>
-                </div>
-              )}
-            </div>
-
+                ))}
+              </div>
+            )}
             {graphCandidates.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                Select a Polymarket market to view its price history.
-              </p>
-            ) : graphLoading ? (
-              <p className="text-sm text-gray-400">Loading history...</p>
-            ) : graphError ? (
-              <p className="text-sm text-red-400">{graphError}</p>
-            ) : graphSeries.length === 0 ? (
-              <p className="text-sm text-gray-500">No history data available for this market.</p>
+              <div className="bg-gray-900 border border-gray-700 rounded-xl flex items-center justify-center h-40">
+                <p className="text-sm text-gray-500">Select a Polymarket market to view its price history.</p>
+              </div>
             ) : (
-              <>
-                {(() => {
-                  const baseline = graphNormalized && graphSeries.length > 0 ? graphSeries[0].p : 0;
-                  const displaySeries = graphNormalized
-                    ? graphSeries.map((pt) => ({ t: pt.t, p: pt.p - baseline }))
-                    : graphSeries;
-                  return (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={displaySeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis
-                          dataKey="t"
-                          tickFormatter={formatTime}
-                          stroke="#6b7280"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                        />
-                        <YAxis
-                          domain={graphNormalized ? ['auto', 'auto'] : [0, 100]}
-                          tickFormatter={(v) => graphNormalized ? `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(0)}¢` : `${Number(v).toFixed(0)}¢`}
-                          stroke="#6b7280"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                        />
-                        <Tooltip
-                          formatter={(value: any) =>
-                            graphNormalized
-                              ? [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}¢`, 'Δ YES price']
-                              : [`${Number(value).toFixed(2)}¢`, 'YES price']
-                          }
-                          labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
-                          contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
-                          labelStyle={{ color: '#9ca3af' }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="p"
-                          stroke="#818cf8"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  );
-                })()}
-                <p className="text-xs text-gray-500 mt-2">
-                  Current YES price: {graphCurrentPrice != null ? `${graphCurrentPrice.toFixed(2)}¢` : 'N/A'}
-                  {graphNormalized && graphSeries.length > 0 && (
-                    <span className="ml-2 text-indigo-400">
-                      (normalized from {graphSeries[0].p.toFixed(2)}¢)
-                    </span>
-                  )}
-                </p>
-              </>
+              <PriceChart
+                history={graphHistory}
+                question={graphCandidates.find(c => c.id === graphMarketId)?.question ?? ''}
+                color="#818cf8"
+                loading={graphLoading}
+                error={graphError}
+              />
             )}
           </div>
         </div>
