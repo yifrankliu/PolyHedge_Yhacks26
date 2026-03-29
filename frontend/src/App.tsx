@@ -8,10 +8,10 @@ import StrategyBuilder from './components/StrategyBuilder';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'portfolio', label: 'Position Input' },
-  { id: 'scanner', label: 'Correlation Scanner' },
-  { id: 'compare', label: 'Market Comparator' },
   { id: 'hedge', label: 'Hedge Scanner' },
   { id: 'strategy', label: 'Strategy Builder' },
+  { id: 'scanner', label: 'Correlation Scanner' },
+  { id: 'compare', label: 'Market Comparator' },
 ];
 
 

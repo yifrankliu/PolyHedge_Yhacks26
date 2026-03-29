@@ -1,20 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Market,
+  MarketHistory,
   getPolymarketHistory,
   getKalshiMarket,
   getPolymarketMarket,
 } from '../api/client';
 import MarketSearchWidget from './MarketSearchWidget';
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import PriceChart from './PriceChart';
 
 type Source = 'polymarket' | 'kalshi';
 type Side = 'YES' | 'NO';
@@ -42,9 +35,6 @@ const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
 };
 
 const formatCents = (value: number) => value.toFixed(1);
-const toMillis = (t: number) => (t < 1_000_000_000_000 ? t * 1000 : t);
-const formatTime = (t: number) =>
-  new Date(toMillis(t)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (positions: PortfolioPosition[]) => void }) {
   const [positionInputMode, setPositionInputMode] = useState<MarketInputMode>('search');
@@ -79,9 +69,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   const [graphInterval, setGraphInterval] = useState<'1m' | '1w' | 'max'>('1w');
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState('');
-  const [graphSeries, setGraphSeries] = useState<Array<{ t: number; p: number }>>([]);
-  const [graphCurrentPrice, setGraphCurrentPrice] = useState<number | null>(null);
-  const [graphNormalized, setGraphNormalized] = useState(false);
+  const [graphHistory, setGraphHistory] = useState<MarketHistory | null>(null);
 
   const liveEntryPriceCents = useMemo(() => {
     if (!positionMarket || positionMarket.market_price_cents == null) return null;
@@ -103,14 +91,14 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   useEffect(() => {
     if (!graphCandidates.length) {
       setGraphMarketId('');
-      setGraphSeries([]);
-      setGraphCurrentPrice(null);
+      setGraphHistory(null);
       setGraphError('');
       return;
     }
     const stillValid = graphCandidates.some((candidate) => candidate.id === graphMarketId);
     if (!graphMarketId || !stillValid) {
       setGraphMarketId(graphCandidates[0].id);
+      setGraphHistory(null);
     }
   }, [graphCandidates, graphMarketId]);
 
@@ -121,18 +109,9 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
       setGraphError('');
       try {
         const res = await getPolymarketHistory(graphMarketId, graphInterval);
-        const points = (res.history || [])
-          .map((point) => ({ t: Number(point.t), p: Number(point.p) * 100 }))
-          .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p));
-        setGraphSeries(points);
-        setGraphCurrentPrice(
-          res.current_price != null && Number.isFinite(Number(res.current_price))
-            ? Number(res.current_price) * 100
-            : null,
-        );
+        setGraphHistory(res);
       } catch {
-        setGraphSeries([]);
-        setGraphCurrentPrice(null);
+        setGraphHistory(null);
         setGraphError('Could not load market history.');
       } finally {
         setGraphLoading(false);
@@ -554,109 +533,47 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             )}
           </div>
 
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-sm font-semibold text-gray-200">Market Graph</p>
-              {graphCandidates.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <select
-                    value={graphMarketId}
-                    onChange={(e) => setGraphMarketId(e.target.value)}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 max-w-[220px]"
-                  >
-                    {graphCandidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {candidate.question}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={graphInterval}
-                    onChange={(e) => setGraphInterval(e.target.value as '1m' | '1w' | 'max')}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600"
-                  >
-                    <option value="1m">1m</option>
-                    <option value="1w">1w</option>
-                    <option value="max">max</option>
-                  </select>
+          <div className="space-y-3">
+            {graphCandidates.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={graphMarketId}
+                  onChange={(e) => setGraphMarketId(e.target.value)}
+                  className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 flex-1 min-w-0"
+                >
+                  {graphCandidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.question}
+                    </option>
+                  ))}
+                </select>
+                {(['1w', '1m', 'max'] as const).map((iv) => (
                   <button
-                    onClick={() => setGraphNormalized((n) => !n)}
-                    className={`px-2 py-1.5 rounded text-xs border transition-colors ${
-                      graphNormalized
-                        ? 'bg-indigo-700 text-white border-indigo-500'
-                        : 'bg-gray-800 text-gray-400 border-gray-600 hover:text-gray-200'
+                    key={iv}
+                    onClick={() => setGraphInterval(iv)}
+                    className={`px-2.5 py-1.5 rounded text-xs font-medium border transition-colors ${
+                      graphInterval === iv
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-gray-200'
                     }`}
                   >
-                    Δ Norm
+                    {iv.toUpperCase()}
                   </button>
-                </div>
-              )}
-            </div>
-
+                ))}
+              </div>
+            )}
             {graphCandidates.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                Select a Polymarket market to view its price history.
-              </p>
-            ) : graphLoading ? (
-              <p className="text-sm text-gray-400">Loading history...</p>
-            ) : graphError ? (
-              <p className="text-sm text-red-400">{graphError}</p>
-            ) : graphSeries.length === 0 ? (
-              <p className="text-sm text-gray-500">No history data available for this market.</p>
+              <div className="bg-gray-900 border border-gray-700 rounded-xl flex items-center justify-center h-40">
+                <p className="text-sm text-gray-500">Select a Polymarket market to view its price history.</p>
+              </div>
             ) : (
-              <>
-                {(() => {
-                  const baseline = graphNormalized && graphSeries.length > 0 ? graphSeries[0].p : 0;
-                  const displaySeries = graphNormalized
-                    ? graphSeries.map((pt) => ({ t: pt.t, p: pt.p - baseline }))
-                    : graphSeries;
-                  return (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={displaySeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis
-                          dataKey="t"
-                          tickFormatter={formatTime}
-                          stroke="#6b7280"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                        />
-                        <YAxis
-                          domain={graphNormalized ? ['auto', 'auto'] : [0, 100]}
-                          tickFormatter={(v) => graphNormalized ? `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(0)}¢` : `${Number(v).toFixed(0)}¢`}
-                          stroke="#6b7280"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                        />
-                        <Tooltip
-                          formatter={(value: any) =>
-                            graphNormalized
-                              ? [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}¢`, 'Δ YES price']
-                              : [`${Number(value).toFixed(2)}¢`, 'YES price']
-                          }
-                          labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
-                          contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
-                          labelStyle={{ color: '#9ca3af' }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="p"
-                          stroke="#818cf8"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  );
-                })()}
-                <p className="text-xs text-gray-500 mt-2">
-                  Current YES price: {graphCurrentPrice != null ? `${graphCurrentPrice.toFixed(2)}¢` : 'N/A'}
-                  {graphNormalized && graphSeries.length > 0 && (
-                    <span className="ml-2 text-indigo-400">
-                      (normalized from {graphSeries[0].p.toFixed(2)}¢)
-                    </span>
-                  )}
-                </p>
-              </>
+              <PriceChart
+                history={graphHistory}
+                question={graphCandidates.find(c => c.id === graphMarketId)?.question ?? ''}
+                color="#818cf8"
+                loading={graphLoading}
+                error={graphError}
+              />
             )}
           </div>
         </div>
