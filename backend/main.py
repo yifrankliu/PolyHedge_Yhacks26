@@ -1701,7 +1701,7 @@ async def hedge_scanner(req: HedgeRequest):
             stability_discounted=corr["rolling_std"] > 0.3 or corr["break_detected"],
         ))
 
-    recommendations.sort(key=lambda x: -abs(x.correlation))
+    recommendations.sort(key=lambda x: -abs(x.correlation) * x.hedge_confidence)
 
     # Sort failed candidates: those with some shared history first, then by question length as tiebreak
     failed_candidates.sort(key=lambda x: -(x.shared_history_days or 0))
