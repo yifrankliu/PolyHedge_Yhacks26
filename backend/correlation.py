@@ -161,6 +161,8 @@ def correlate(
     market_b_id: str,
     history_a: list[dict],
     history_b: list[dict],
+    semantic_similarity: float = 0.0,
+    end_date_proximity: float = 0.0,
 ) -> dict | None:
     sa, sb = align_series(history_a, history_b)
 
@@ -236,10 +238,19 @@ def correlate(
 
     # ── Composite score ───────────────────────────────────────────────────────
     base = abs(full_pearson)
-    stability_bonus = max(0, 0.2 - rolling_std) / 0.2 * 0.2
-    granger_bonus   = 0.15 if min(a_causes_b, b_causes_a) < 0.05 else 0
-    history_penalty = 0.3 if short_history_warning else 0
-    composite = float(np.clip(base + stability_bonus + granger_bonus - history_penalty, 0, 1))
+    stability_bonus  = max(0, 0.2 - rolling_std) / 0.2 * 0.2
+    granger_bonus    = 0.15 if min(a_causes_b, b_causes_a) < 0.05 else 0
+    # Semantic similarity: MiniLM cosine scores are ~0.1 floor for random pairs,
+    # ~0.8+ for near-identical questions. Normalise that range to a 0→0.15 bonus.
+    sem_sim_clamped  = float(np.clip(semantic_similarity, 0.0, 1.0))
+    semantic_bonus   = max(0.0, (sem_sim_clamped - 0.10) / 0.70) * 0.15
+    # End-date proximity: markets resolving close together are more likely related.
+    end_date_bonus   = float(np.clip(end_date_proximity, 0.0, 1.0)) * 0.08
+    history_penalty  = 0.3 if short_history_warning else 0
+    composite = float(np.clip(
+        base + stability_bonus + granger_bonus + semantic_bonus + end_date_bonus - history_penalty,
+        0, 1,
+    ))
 
     return {
         "market_a": market_a_id,
@@ -270,6 +281,9 @@ def correlate(
         # Data quality
         "low_volume_warning": low_volume_warning,
         "short_history_warning": short_history_warning,
+        # Semantic
+        "semantic_similarity": round(sem_sim_clamped, 4),
+        "end_date_proximity": round(float(np.clip(end_date_proximity, 0.0, 1.0)), 4),
         # Composite
         "composite_score": round(composite, 4),
     }

@@ -2,7 +2,9 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime, timezone
 import httpx
+import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -47,6 +49,69 @@ CACHE_TTL = 3600  # 1 hour
 _universe_cache: dict = {"markets": [], "fetched_at": 0.0}
 _history_cache: dict[str, tuple[list, float]] = {}  # conditionId → (history, timestamp)
 
+# ── Semantic embedding helpers ───────────────────────────────────────────────
+_embed_model = None
+_embed_model_attempted = False
+
+
+def _get_embed_model():
+    """Lazy-load sentence-transformers model; returns None if unavailable."""
+    global _embed_model, _embed_model_attempted
+    if _embed_model_attempted:
+        return _embed_model
+    _embed_model_attempted = True
+    try:
+        from sentence_transformers import SentenceTransformer
+        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception:
+        _embed_model = None
+    return _embed_model
+
+
+def compute_semantic_similarity(q_a: str, q_b: str) -> float:
+    """Cosine similarity between two market question embeddings. Returns 0.0 on failure."""
+    if not q_a or not q_b:
+        return 0.0
+    model = _get_embed_model()
+    if model is None:
+        return 0.0
+    try:
+        embs = model.encode([q_a, q_b], normalize_embeddings=True, show_progress_bar=False)
+        return float(np.clip(np.dot(embs[0], embs[1]), 0.0, 1.0))
+    except Exception:
+        return 0.0
+
+
+def batch_semantic_similarities(target_question: str, candidate_questions: list[str]) -> list[float]:
+    """Encode target + all candidates in one pass; returns per-candidate cosine similarities."""
+    if not target_question or not candidate_questions:
+        return [0.0] * len(candidate_questions)
+    model = _get_embed_model()
+    if model is None:
+        return [0.0] * len(candidate_questions)
+    try:
+        all_q = [target_question] + candidate_questions
+        embs = model.encode(all_q, normalize_embeddings=True, batch_size=256, show_progress_bar=False)
+        target_emb = embs[0]
+        sims = np.clip(np.dot(embs[1:], target_emb), 0.0, 1.0).tolist()
+        return sims
+    except Exception:
+        return [0.0] * len(candidate_questions)
+
+
+def compute_end_date_proximity(end_a: str | None, end_b: str | None) -> float:
+    """Returns 1.0 if same day, linear decay to 0.0 at 60 days apart."""
+    if not end_a or not end_b:
+        return 0.0
+    try:
+        def parse(s: str):
+            s = s.replace("Z", "+00:00")
+            return datetime.fromisoformat(s)
+        days_apart = abs((parse(end_a) - parse(end_b)).days)
+        return float(max(0.0, 1.0 - days_apart / 60.0))
+    except Exception:
+        return 0.0
+
 
 async def fetch_market_universe(size: int = 1000) -> list[dict]:
     """Fetch top `size` active Polymarket markets by volume from Gamma API (cached 1h)."""
@@ -83,6 +148,7 @@ async def fetch_market_universe(size: int = 1000) -> list[dict]:
                 "conditionId": cid,
                 "question": m.get("question", ""),
                 "lastTradePrice": float(m.get("lastTradePrice") or 0),
+                "endDate": m.get("endDateIso") or m.get("endDate"),
             })
 
     _universe_cache = {"markets": markets, "fetched_at": time.time()}
@@ -462,16 +528,20 @@ async def polymarket_history(market_id: str, interval: str = "1m"):
 async def correlate_markets(market_a: str = Query(...), market_b: str = Query(...)):
     """Fetch daily price histories for two Polymarket markets and run the full correlation pipeline."""
 
-    async def fetch_history(condition_id: str) -> list[dict]:
+    async def fetch_history(condition_id: str) -> tuple[str, list, str | None]:
+        """Returns (question, history_points, end_date_iso)."""
         async with httpx.AsyncClient(timeout=10) as client:
             clob_resp = await client.get(f"https://clob.polymarket.com/markets/{condition_id}")
         if clob_resp.status_code != 200:
             raise HTTPException(502, f"CLOB lookup failed for {condition_id}: {clob_resp.status_code}")
-        tokens = clob_resp.json().get("tokens") or []
+        clob_data = clob_resp.json()
+        tokens = clob_data.get("tokens") or []
         yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), tokens[0] if tokens else None)
         if not yes_token:
             raise HTTPException(404, f"No YES token for {condition_id}")
         token_id = yes_token["token_id"]
+        question = clob_data.get("question", "")
+        end_date = clob_data.get("end_date_iso") or clob_data.get("end_date")
         async with httpx.AsyncClient(timeout=15) as client:
             hist_resp = await client.get(
                 "https://clob.polymarket.com/prices-history",
@@ -479,11 +549,18 @@ async def correlate_markets(market_a: str = Query(...), market_b: str = Query(..
             )
         if hist_resp.status_code != 200:
             raise HTTPException(502, f"CLOB history failed for {condition_id}: {hist_resp.status_code}")
-        return hist_resp.json().get("history", [])
+        return question, hist_resp.json().get("history", []), end_date
 
-    hist_a, hist_b = await asyncio.gather(fetch_history(market_a), fetch_history(market_b))
+    (q_a, hist_a, end_a), (q_b, hist_b, end_b) = await asyncio.gather(
+        fetch_history(market_a), fetch_history(market_b)
+    )
 
-    result = correlate(market_a, market_b, hist_a, hist_b)
+    sem_sim   = compute_semantic_similarity(q_a, q_b)
+    end_prox  = compute_end_date_proximity(end_a, end_b)
+
+    result = correlate(market_a, market_b, hist_a, hist_b,
+                       semantic_similarity=sem_sim,
+                       end_date_proximity=end_prox)
     if result is None:
         raise HTTPException(422, "Could not compute correlation — insufficient data")
     return result
@@ -514,12 +591,21 @@ async def correlate_scan_stream(market_id: str = Query(...)):
         total = len(candidates)
         yield sse({"type": "init", "total": total})
 
-        # Phase 2 — fetch target history
+        # Phase 2 — fetch target history + resolve target question/end-date
         target = await fetch_clob_history_cached(market_id)
         if target is None:
             yield sse({"type": "error", "message": "Could not fetch target market history"})
             return
         _, hist_a = target
+
+        # Resolve target question & end-date (may already be in universe)
+        target_meta = next((m for m in universe if m["conditionId"] == market_id), None)
+        target_question = target_meta["question"] if target_meta else ""
+        target_end_date = target_meta.get("endDate") if target_meta else None
+
+        # Pre-compute all candidate embeddings in one batch (fast: ~0.1s for 1000 items)
+        candidate_questions = [m["question"] for m in candidates]
+        semantic_sims = batch_semantic_similarities(target_question, candidate_questions)
 
         # Phase 3 — batch scan
         BATCH = 30
@@ -532,13 +618,17 @@ async def correlate_scan_stream(market_id: str = Query(...)):
                 fetch_clob_history_cached(m["conditionId"]) for m in batch
             ], return_exceptions=True)
 
-            for m, res in zip(batch, results):
+            for j, (m, res) in enumerate(zip(batch, results)):
                 scanned += 1
                 if isinstance(res, Exception) or res is None:
                     continue
                 _, hist_b = res
+                sem_sim  = semantic_sims[i + j]
+                end_prox = compute_end_date_proximity(target_end_date, m.get("endDate"))
                 try:
-                    corr = correlate(market_id, m["conditionId"], hist_a, hist_b)
+                    corr = correlate(market_id, m["conditionId"], hist_a, hist_b,
+                                     semantic_similarity=sem_sim,
+                                     end_date_proximity=end_prox)
                 except Exception:
                     continue
                 if corr is None or corr.get("error"):
@@ -561,6 +651,8 @@ async def correlate_scan_stream(market_id: str = Query(...)):
                         "rolling_std": corr["rolling_std"],
                         "break_detected": corr["break_detected"],
                         "granger_dominant_direction": corr.get("granger_dominant_direction"),
+                        "semantic_similarity": corr["semantic_similarity"],
+                        "end_date_proximity": corr["end_date_proximity"],
                     })
 
             yield sse({"type": "progress", "scanned": scanned, "total": total, "found": found})

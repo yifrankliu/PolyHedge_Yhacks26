@@ -323,9 +323,65 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
         <div className="bg-gray-800 rounded-lg p-3">
           <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Granger Causality</p>
           <p className="text-sm font-bold text-white leading-tight mt-1">{grangerLabel()}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Composite: {score.toFixed(2)}</p>
+          <p className="text-xs text-gray-500 mt-0.5">A→B: {result.a_causes_b_pval.toFixed(3)} · B→A: {result.b_causes_a_pval.toFixed(3)}</p>
         </div>
       </div>
+
+      {/* Semantic + composite row */}
+      {(result.semantic_similarity != null) && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-gray-800 rounded-lg p-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Semantic Similarity</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.round(Math.max(0, Math.min(1, (result.semantic_similarity - 0.1) / 0.7)) * 100)}%`,
+                    backgroundColor: result.semantic_similarity > 0.55 ? '#818cf8' : result.semantic_similarity > 0.35 ? '#a78bfa' : '#6b7280',
+                  }}
+                />
+              </div>
+              <span className="text-sm font-bold text-white font-mono">{result.semantic_similarity.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {result.semantic_similarity > 0.55 ? 'Strongly related topic' :
+               result.semantic_similarity > 0.35 ? 'Moderately related' : 'Topically dissimilar'}
+            </p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Resolution Proximity</p>
+            <p className="text-xl font-bold text-white mt-1">
+              {result.end_date_proximity > 0
+                ? `${Math.round(result.end_date_proximity * 100)}%`
+                : '—'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {result.end_date_proximity > 0.9 ? 'Same resolution window' :
+               result.end_date_proximity > 0.5 ? 'Close resolution dates' :
+               result.end_date_proximity > 0 ? 'Divergent timelines' : 'No date data'}
+            </p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 md:col-span-1">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Composite Score</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.round(score * 100)}%`,
+                    backgroundColor: score > 0.6 ? '#34d399' : score > 0.35 ? '#fbbf24' : '#9ca3af',
+                  }}
+                />
+              </div>
+              <span className="text-sm font-bold text-white font-mono">{score.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Pearson + stability + Granger + semantic + proximity
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Structural break info */}
       {result.break_detected && result.pre_break_pearson !== null && (

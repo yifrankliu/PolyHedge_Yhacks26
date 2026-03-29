@@ -117,6 +117,8 @@ export interface CorrelationResult {
   granger_dominant_direction: string | null;
   low_volume_warning: boolean;
   short_history_warning: boolean;
+  semantic_similarity: number;
+  end_date_proximity: number;
   composite_score: number;
   error?: string;
 }

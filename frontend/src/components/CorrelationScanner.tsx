@@ -29,6 +29,8 @@ interface ScanResult {
   rolling_std: number;
   break_detected: boolean;
   granger_dominant_direction: string | null;
+  semantic_similarity: number;
+  end_date_proximity: number;
 }
 
 function pearsonColor(r: number): string {
@@ -56,6 +58,20 @@ function lagLabel(best_lag_days: number, lead_direction: string): string {
   if (best_lag_days === 0) return 'Sync';
   const abs = Math.abs(best_lag_days);
   return lead_direction === 'A_leads_B' ? `A+${abs}d` : `B+${abs}d`;
+}
+
+function semanticBar(sim: number) {
+  // MiniLM cosine sims: ~0.1 floor, ~0.8+ = very similar; normalize display to 0.1–0.8 range
+  const pct = Math.round(Math.max(0, Math.min(1, (sim - 0.1) / 0.7)) * 100);
+  const color = sim > 0.55 ? '#818cf8' : sim > 0.35 ? '#a78bfa' : '#6b7280';
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      <span className="text-xs font-mono" style={{ color }}>{sim.toFixed(2)}</span>
+    </div>
+  );
 }
 
 export default function CorrelationScanner({ onCompare }: { onCompare: (target: Market, correlated: Market) => void }) {
@@ -269,6 +285,7 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Price</th>
                   <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Composite</th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Pearson r</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Semantic</th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Lead/Lag</th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Days</th>
                   <th className="px-3 py-2.5 w-16"></th>
@@ -290,6 +307,9 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                     <td className="px-3 py-3">{compositeBar(r.composite_score)}</td>
                     <td className="px-3 py-3 text-right font-mono text-xs font-bold" style={{ color: pearsonColor(r.full_pearson) }}>
                       {r.full_pearson >= 0 ? '+' : ''}{r.full_pearson.toFixed(3)}
+                    </td>
+                    <td className="px-3 py-3">
+                      {semanticBar(r.semantic_similarity ?? 0)}
                     </td>
                     <td className="px-3 py-3 text-right text-xs text-gray-400">
                       {lagLabel(r.best_lag_days, r.lead_direction)}
