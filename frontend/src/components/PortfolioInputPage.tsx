@@ -614,15 +614,14 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
       </div>
 
       {onScanHedges && (
-        <div className="flex justify-end pt-2">
-          <button
-            onClick={() => onScanHedges(positions)}
-            disabled={positions.length === 0}
-            className="bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition-colors"
-          >
-            Scan for Hedges →
-          </button>
-        </div>
+        <button
+          onClick={() => onScanHedges(positions)}
+          disabled={positions.length === 0}
+          className="w-full py-4 rounded-xl font-bold text-base tracking-wide transition-colors disabled:opacity-40 text-white"
+          style={{ backgroundColor: positions.length === 0 ? undefined : '#0d1b3e', background: positions.length > 0 ? 'linear-gradient(135deg, #0d1b3e 0%, #1a2f6b 100%)' : undefined }}
+        >
+          Scan for Hedges →
+        </button>
       )}
     </div>
   );

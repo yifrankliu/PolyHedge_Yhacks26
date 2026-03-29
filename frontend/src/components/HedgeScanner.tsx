@@ -494,102 +494,95 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Hedge Scanner</h2>
         <p className="text-gray-400 text-sm mt-1">
-          Enter your position and find correlated markets to hedge against. Uses minimum-variance
-          sizing with optional Deribit options signal for crypto markets.
+          Finds correlated markets to hedge your positions. Uses minimum-variance sizing with
+          optional Deribit options signal for crypto markets.
         </p>
       </div>
 
-      {initialPositions.length > 0 && (
-        <div className="bg-gray-900 rounded-xl border border-green-800 p-5 mb-6">
-          <p className="text-sm font-semibold text-green-300 mb-3">
-            Positions from Portfolio ({initialPositions.length})
-          </p>
-          <div className="space-y-2">
-            {initialPositions.map((pos) => (
-              <div key={pos.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
-                <div>
-                  <p className="text-sm text-white">{pos.market_question}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {pos.source} · {pos.side} · {pos.entry_price_cents.toFixed(1)}¢ · ${pos.stake_usd}
-                  </p>
+      {initialPositions.length === 0 ? (
+        <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
+          <p className="text-gray-500 text-sm">Add positions in the Position Input tab, then click Scan for Hedges.</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-gray-900 rounded-xl border border-gray-700 p-5 mb-6">
+            <p className="text-sm font-semibold text-gray-200 mb-3">
+              Your Positions ({initialPositions.length})
+            </p>
+            <div className="space-y-2">
+              {initialPositions.map((pos) => (
+                <div key={pos.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
+                  <div>
+                    <p className="text-sm text-white">{pos.market_question}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {pos.source} · {pos.side} · {pos.entry_price_cents.toFixed(1)}¢ · ${pos.stake_usd}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => scanPosition(pos)}
+                    disabled={loading}
+                    className="ml-4 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium whitespace-nowrap"
+                  >
+                    {loading ? '…' : 'Scan'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => scanPosition(pos)}
-                  disabled={loading}
-                  className="ml-4 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium whitespace-nowrap"
-                >
-                  {loading ? '…' : 'Scan'}
-                </button>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Input panel */}
-        <div className="lg:col-span-1">
-          <PositionForm onSubmit={handleSubmit} loading={loading} />
-        </div>
-
-        {/* Results panel */}
-        <div className="lg:col-span-2 space-y-4">
-          {loading && (
-            <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
-              <div className="text-center">
-                <p className="text-gray-300 font-medium animate-pulse">Scanning markets…</p>
-                <p className="text-gray-500 text-xs mt-1">
-                  Fetching price histories and computing correlations
-                </p>
+          <div className="space-y-4">
+            {loading && (
+              <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
+                <div className="text-center">
+                  <p className="text-gray-300 font-medium animate-pulse">Scanning markets…</p>
+                  <p className="text-gray-500 text-xs mt-1">Fetching price histories and computing correlations</p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {error && (
-            <div className="bg-red-900/30 border border-red-700 rounded-xl p-4">
-              <p className="text-red-400 text-sm">{error}</p>
-            </div>
-          )}
+            {error && (
+              <div className="bg-red-900/30 border border-red-700 rounded-xl p-4">
+                <p className="text-red-400 text-sm">{error}</p>
+              </div>
+            )}
 
-          {result && !loading && (
-            <>
-              {/* API errors */}
-              {Object.keys(result.errors).length > 0 && (
-                <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
-                  {Object.entries(result.errors).map(([k, v]) => (
-                    <p key={k} className="text-xs text-yellow-300">· <span className="font-medium">{k}:</span> {v}</p>
-                  ))}
-                </div>
-              )}
+            {result && !loading && (
+              <>
+                {Object.keys(result.errors).length > 0 && (
+                  <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
+                    {Object.entries(result.errors).map(([k, v]) => (
+                      <p key={k} className="text-xs text-yellow-300">· <span className="font-medium">{k}:</span> {v}</p>
+                    ))}
+                  </div>
+                )}
 
-              {/* BL signal */}
-              {result.bl_signal && <BLSignalCard signal={result.bl_signal} />}
+                {result.bl_signal && <BLSignalCard signal={result.bl_signal} />}
 
-              {/* Recommendations */}
-              {result.recommendations.length === 0 ? (
-                <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
-                  <p className="text-gray-500 text-sm">No hedge candidates found. Try broader search keywords.</p>
-                </div>
-              ) : (
-                <>
-                  <p className="text-xs text-gray-500 uppercase tracking-wider">
-                    {result.recommendations.length} hedge candidate{result.recommendations.length !== 1 ? 's' : ''} — ranked by confidence
-                  </p>
-                  {result.recommendations.map((rec, i) => (
-                    <RecommendationCard key={rec.candidate_market_id} rec={rec} index={i} />
-                  ))}
-                </>
-              )}
-            </>
-          )}
+                {result.recommendations.length === 0 ? (
+                  <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
+                    <p className="text-gray-500 text-sm">No hedge candidates found. Try a position with more trading history.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">
+                      {result.recommendations.length} hedge candidate{result.recommendations.length !== 1 ? 's' : ''} — ranked by confidence
+                    </p>
+                    {result.recommendations.map((rec, i) => (
+                      <RecommendationCard key={rec.candidate_market_id} rec={rec} index={i} />
+                    ))}
+                  </>
+                )}
+              </>
+            )}
 
-          {!result && !loading && !error && (
-            <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
-              <p className="text-gray-500 text-sm">Enter your position and click Scan for Hedges.</p>
-            </div>
-          )}
-        </div>
-      </div>
+            {!result && !loading && !error && (
+              <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
+                <p className="text-gray-500 text-sm">Select a position above to scan for hedges.</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
