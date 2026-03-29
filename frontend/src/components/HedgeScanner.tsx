@@ -251,7 +251,15 @@ const DEFAULT_MIN_EVENTS = 8;
 const DEFAULT_MIN_SHARED_DAYS = 32;
 const DEFAULT_TOP_N = 75;
 
-export default function HedgeScanner({ initialPositions = [] }: { initialPositions?: PortfolioPosition[] }) {
+export default function HedgeScanner({
+  initialPositions = [],
+  onRecommendationsUpdate,
+  onNavigateToStrategy,
+}: {
+  initialPositions?: PortfolioPosition[];
+  onRecommendationsUpdate?: (recs: HedgeRecommendation[], pos: PortfolioPosition) => void;
+  onNavigateToStrategy?: () => void;
+}) {
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
   const [scanned, setScanned] = useState(0);
@@ -305,9 +313,13 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
         setScanned(d.scanned);
         setFoundCount(d.found);
       } else if (d.type === 'result') {
-        setRecommendations(prev =>
-          [...prev, d as HedgeRecommendation].sort((a, b) => b.hedge_confidence - a.hedge_confidence)
-        );
+        setRecommendations(prev => {
+          const next = [...prev, d as HedgeRecommendation].sort(
+            (a, b) => b.hedge_confidence - a.hedge_confidence,
+          );
+          onRecommendationsUpdate?.(next, pos);
+          return next;
+        });
       } else if (d.type === 'done') {
         setScanned(d.scanned);
         setFoundCount(d.found);
@@ -431,6 +443,14 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
                     style={{ width: `${total > 0 ? Math.round((scanned / total) * 100) : 0}%` }}
                   />
                 </div>
+                {done && recommendations.length > 0 && (
+                  <button
+                    onClick={onNavigateToStrategy}
+                    className="mt-3 w-full bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Build Strategy →
+                  </button>
+                )}
               </div>
             )}
 

@@ -1,21 +1,25 @@
 import { useState } from 'react';
 import MarketCompare from './components/MarketCompare';
 import CorrelationScanner from './components/CorrelationScanner';
-import { Market } from './api/client';
+import { Market, HedgeRecommendation } from './api/client';
 import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInputPage';
 import HedgeScanner from './components/HedgeScanner';
+import StrategyBuilder from './components/StrategyBuilder';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'portfolio', label: 'Position Input' },
   { id: 'scanner', label: 'Correlation Scanner' },
   { id: 'compare', label: 'Market Comparator' },
   { id: 'hedge', label: 'Hedge Scanner' },
+  { id: 'strategy', label: 'Strategy Builder' },
 ];
 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('portfolio');
   const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
+  const [hedgeRecommendations, setHedgeRecommendations] = useState<HedgeRecommendation[]>([]);
+  const [strategyPositions, setStrategyPositions] = useState<PortfolioPosition[]>([]);
   const [pendingMarketA, setPendingMarketA] = useState<Market | null>(null);
   const [pendingMarketB, setPendingMarketB] = useState<Market | null>(null);
 
@@ -27,7 +31,13 @@ export default function App() {
 
   const handleScanHedges = (positions: PortfolioPosition[]) => {
     setHedgePositions(positions);
+    setStrategyPositions(positions);
     setActiveTab('hedge');
+  };
+
+  const handleRecommendationsUpdate = (recs: HedgeRecommendation[], pos: PortfolioPosition) => {
+    setHedgeRecommendations(recs);
+    setStrategyPositions(prev => (prev.length ? prev : [pos]));
   };
 
   return (
@@ -91,7 +101,17 @@ export default function App() {
           <CorrelationScanner onCompare={handleCompare} />
         </div>
         <div style={{ display: activeTab === 'hedge' ? 'block' : 'none' }}>
-          <HedgeScanner initialPositions={hedgePositions} />
+          <HedgeScanner
+            initialPositions={hedgePositions}
+            onRecommendationsUpdate={handleRecommendationsUpdate}
+            onNavigateToStrategy={() => setActiveTab('strategy')}
+          />
+        </div>
+        <div style={{ display: activeTab === 'strategy' ? 'block' : 'none' }}>
+          <StrategyBuilder
+            positions={strategyPositions}
+            recommendations={hedgeRecommendations}
+          />
         </div>
       </main>
     </div>
