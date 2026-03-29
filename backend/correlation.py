@@ -241,6 +241,9 @@ def correlate(
     history_penalty = 0.3 if short_history_warning else 0
     composite = float(np.clip(base + stability_bonus + granger_bonus - history_penalty, 0, 1))
 
+    sigma_a = float(np.std(rx[mask_r])) if mask_r.sum() > 1 else 0.0
+    sigma_b = float(np.std(ry[mask_r])) if mask_r.sum() > 1 else 0.0
+
     return {
         "market_a": market_a_id,
         "market_b": market_b_id,
@@ -249,6 +252,8 @@ def correlate(
         # Core
         "full_pearson": round(full_pearson, 4),
         "full_pearson_returns": round(full_pearson_returns, 4),
+        "sigma_logit_returns_a": round(sigma_a, 6),
+        "sigma_logit_returns_b": round(sigma_b, 6),
         # Stability
         "rolling_mean": round(rolling_mean, 4),
         "rolling_std": round(rolling_std, 4),
