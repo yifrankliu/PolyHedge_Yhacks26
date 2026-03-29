@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as ReTooltip, ResponsiveContainer, ReferenceLine,
-  ScatterChart, Scatter, ZAxis, LineChart, Bar, BarChart,
+  ScatterChart, Scatter, ZAxis, LineChart, Bar,
 } from 'recharts';
 import { runBacktest, BacktestResponse, ScenarioItem } from '../api/client';
 
@@ -25,13 +25,10 @@ interface Props {
 const fmt$ = (n: number) =>
   `${n >= 0 ? '+' : '−'}$${Math.abs(n).toFixed(2)}`;
 const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
-const fmtPp  = (n: number) => `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}pp`;
 
 // ── Design tokens ──────────────────────────────────────────────────────────────
 const INDIGO   = '#6366f1';
 const IND_MED  = '#818cf8';
-const IND_DIM  = '#4f46e5';
-const CARD_BG  = '#18181b';   // zinc-950 — used for area masking
 const EMERALD  = '#34d399';
 const RED      = '#f87171';
 const AMBER    = '#f59e0b';
@@ -70,7 +67,7 @@ function FanTooltip({ active, payload, label, probLossAtT }: any) {
     <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs shadow-2xl min-w-[170px]">
       <p className="text-zinc-400 mb-2 font-medium">Day {t + 1}</p>
       <div className="space-y-1">
-        {[['95th', 'p95', EMERALD], ['Median', 'p50', IND_MED], ['5th', 'p5', RED]] .map(([lbl, key, col]) => (
+        {[['95th', 'p95', EMERALD], ['Median', 'p50', IND_MED], ['5th', 'p5', RED]].map(([lbl, key, col]) => (
           byKey[key] !== undefined && (
             <div key={key} className="flex justify-between gap-4">
               <span className="text-zinc-500">{lbl}</span>
