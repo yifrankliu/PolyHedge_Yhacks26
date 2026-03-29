@@ -12,9 +12,14 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+import {
+  getPolymarketHistory, correlateMarkets,
+  analyzeLogicalCorrelation, getPolymarketVolumeHistory,
+  Market, MarketHistory, CorrelationResult, LogicalCorrelation, VolumePoint,
+} from '../api/client';
 import MarketSearchWidget from './MarketSearchWidget';
 import PriceChart from './PriceChart';
+import SpikeInvestigationPanel, { SpikePoint } from './SpikeInvestigationPanel';
 
 const INTERVALS = [
   { label: '1W', value: '1w' },
@@ -246,6 +251,151 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
   );
 }
 
+// ── Relationship-type display helpers ──────────────────────────────────────────
+const RELATIONSHIP_META: Record<string, { label: string; color: string; bg: string }> = {
+  causal:        { label: 'Causal',        color: '#34d399', bg: '#065f46' },
+  shared_driver: { label: 'Shared Driver', color: '#818cf8', bg: '#312e81' },
+  thematic:      { label: 'Thematic',      color: '#a78bfa', bg: '#4c1d95' },
+  inverse:       { label: 'Inverse',       color: '#f87171', bg: '#7f1d1d' },
+  coincidental:  { label: 'Coincidental',  color: '#9ca3af', bg: '#374151' },
+  none:          { label: 'None',          color: '#6b7280', bg: '#1f2937' },
+};
+
+function logicalScoreColor(s: number): string {
+  if (s >= 0.6) return '#34d399';
+  if (s >= 0.35) return '#fbbf24';
+  return '#9ca3af';
+}
+
+function LogicalCorrelationPanel({
+  marketA, marketB, corrResult,
+}: {
+  marketA: Market;
+  marketB: Market;
+  corrResult: CorrelationResult | null;
+}) {
+  const [result, setResult] = useState<LogicalCorrelation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const run = async () => {
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const r = await analyzeLogicalCorrelation({
+        market_a_question: marketA.question,
+        market_b_question: marketB.question,
+        pearson_r: corrResult?.full_pearson ?? 0,
+        semantic_similarity: corrResult?.semantic_similarity ?? 0,
+      });
+      setResult(r);
+    } catch {
+      setError('Analysis failed — check that ANTHROPIC_API_KEY is configured.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const meta = result ? (RELATIONSHIP_META[result.relationship_type] ?? RELATIONSHIP_META.none) : null;
+  const pct  = result ? Math.round(result.logical_score * 100) : 0;
+
+  return (
+    <div className="bg-gray-900 rounded-xl border border-gray-700 p-5">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Logical Analysis
+          </span>
+          <span className="text-[10px] bg-indigo-900 text-indigo-300 px-1.5 py-0.5 rounded font-medium">
+            AI
+          </span>
+        </div>
+        {!result && (
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+          >
+            {loading ? 'Analyzing…' : 'Run LLM Analysis'}
+          </button>
+        )}
+        {result && (
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {loading ? 'Analyzing…' : 'Re-run'}
+          </button>
+        )}
+      </div>
+
+      {/* Empty / error states */}
+      {!result && !loading && !error && (
+        <p className="text-gray-500 text-xs">
+          Click "Run LLM Analysis" to have Claude Haiku assess whether these
+          markets have a logical or causal relationship — beyond what the
+          statistics alone can tell you.
+        </p>
+      )}
+      {error && <p className="text-red-400 text-xs">{error}</p>}
+      {loading && (
+        <div className="flex items-center gap-2 text-gray-500 text-xs animate-pulse">
+          <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+          Claude Haiku is reasoning about these markets…
+        </div>
+      )}
+
+      {/* Result */}
+      {result && meta && (
+        <div className="space-y-4">
+          {/* Score + type badge */}
+          <div className="flex items-center gap-4">
+            {/* Score gauge */}
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">Logical Correlation Score</span>
+                <span className="text-sm font-bold font-mono" style={{ color: logicalScoreColor(result.logical_score) }}>
+                  {result.logical_score.toFixed(2)}
+                </span>
+              </div>
+              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${pct}%`,
+                    backgroundColor: logicalScoreColor(result.logical_score),
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-[10px] text-gray-600 mt-0.5">
+                <span>Coincidental</span>
+                <span>Moderate</span>
+                <span>Direct dependency</span>
+              </div>
+            </div>
+
+            {/* Relationship type badge */}
+            <div
+              className="flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg"
+              style={{ color: meta.color, backgroundColor: meta.bg + '66' }}
+            >
+              {meta.label}
+            </div>
+          </div>
+
+          {/* Explanation */}
+          <div className="border-t border-gray-800 pt-3">
+            <p className="text-sm text-gray-300 leading-relaxed">{result.explanation}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MarketCompare({ initialMarketA, initialMarketB }: { initialMarketA?: Market; initialMarketB?: Market }) {
   const [marketA, setMarketA] = useState<Market | null>(null);
   const [marketB, setMarketB] = useState<Market | null>(null);
@@ -255,9 +405,13 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
   const [loadingB, setLoadingB] = useState(false);
   const [errorA, setErrorA] = useState('');
   const [errorB, setErrorB] = useState('');
+  const [volumeA, setVolumeA] = useState<VolumePoint[] | null>(null);
+  const [volumeB, setVolumeB] = useState<VolumePoint[] | null>(null);
   const [interval, setInterval] = useState('1m');
   const [correlation, setCorrelation] = useState<CorrelationResult | null>(null);
   const [corrLoading, setCorrLoading] = useState(false);
+  const [spikeA, setSpikeA] = useState<SpikePoint | null>(null);
+  const [spikeB, setSpikeB] = useState<SpikePoint | null>(null);
 
   useEffect(() => {
     if (!marketA?.id || !marketB?.id) { setCorrelation(null); return; }
@@ -274,11 +428,18 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
       if (!market.id) return;
       const setLoading = slot === 'A' ? setLoadingA : setLoadingB;
       const setHistory = slot === 'A' ? setHistoryA : setHistoryB;
-      const setError = slot === 'A' ? setErrorA : setErrorB;
+      const setError   = slot === 'A' ? setErrorA   : setErrorB;
+      const setVolume  = slot === 'A' ? setVolumeA   : setVolumeB;
       setLoading(true);
       setError('');
       try {
-        setHistory(await getPolymarketHistory(market.id, iv));
+        // Fetch price history and volume in parallel
+        const [hist, vol] = await Promise.all([
+          getPolymarketHistory(market.id, iv),
+          getPolymarketVolumeHistory(market.id).catch(() => null),
+        ]);
+        setHistory(hist);
+        setVolume(vol && vol.length > 0 ? vol : null);
       } catch (e: any) {
         setError(e?.response?.data?.detail || 'Failed to load price history');
         setHistory(null);
@@ -318,6 +479,10 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
     if (marketB?.id) fetchHistory(marketB, 'B', iv);
   };
 
+  // Clear spike + volume when a new market is chosen
+  const wrappedSelectA = (m: Market) => { setSpikeA(null); setVolumeA(null); handleSelectA(m); };
+  const wrappedSelectB = (m: Market) => { setSpikeB(null); setVolumeB(null); handleSelectB(m); };
+
   const hasCharts = (marketA && (historyA || loadingA || errorA)) ||
                     (marketB && (historyB || loadingB || errorB));
 
@@ -332,8 +497,8 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
 
       {/* Market pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <MarketSearchWidget label="Market A" accentColor={MARKET_A_COLOR} selected={marketA} onSelect={handleSelectA} />
-        <MarketSearchWidget label="Market B" accentColor={MARKET_B_COLOR} selected={marketB} onSelect={handleSelectB} />
+        <MarketSearchWidget label="Market A" accentColor={MARKET_A_COLOR} selected={marketA} onSelect={wrappedSelectA} />
+        <MarketSearchWidget label="Market B" accentColor={MARKET_B_COLOR} selected={marketB} onSelect={wrappedSelectB} />
       </div>
 
       {/* Time range selector */}
@@ -365,6 +530,9 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
             color={MARKET_A_COLOR}
             loading={loadingA}
             error={errorA}
+            volumeData={volumeA}
+            onPointClick={(pt) => { setSpikeA(pt); setSpikeB(null); }}
+            selectedPoint={spikeA}
           />
         )}
         {marketB && (
@@ -374,6 +542,9 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
             color={MARKET_B_COLOR}
             loading={loadingB}
             error={errorB}
+            volumeData={volumeB}
+            onPointClick={(pt) => { setSpikeB(pt); setSpikeA(null); }}
+            selectedPoint={spikeB}
           />
         )}
         {!marketA && !marketB && (
@@ -383,14 +554,43 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
         )}
       </div>
 
+      {/* Spike investigation panels — one per market, always present when market is loaded */}
+      {(marketA || marketB) && (
+        <div className="mt-4 space-y-3">
+          {marketA && (
+            <SpikeInvestigationPanel
+              market={marketA}
+              selectedPoint={spikeA}
+              marketLabel="Market A"
+              accentColor={MARKET_A_COLOR}
+              onClear={() => setSpikeA(null)}
+            />
+          )}
+          {marketB && (
+            <SpikeInvestigationPanel
+              market={marketB}
+              selectedPoint={spikeB}
+              marketLabel="Market B"
+              accentColor={MARKET_B_COLOR}
+              onClear={() => setSpikeB(null)}
+            />
+          )}
+        </div>
+      )}
+
       {/* Correlation panel — shown once both markets are selected */}
       {marketA && marketB && (
-        <div className="mt-4">
+        <div className="mt-4 space-y-4">
           <CorrelationPanel
             result={correlation}
             marketA={marketA}
             marketB={marketB}
             loading={corrLoading}
+          />
+          <LogicalCorrelationPanel
+            marketA={marketA}
+            marketB={marketB}
+            corrResult={correlation}
           />
         </div>
       )}

@@ -19,7 +19,7 @@ from correlation import correlate, align_series, logit
 from rigorous_hedge import rigorous_event_hedge
 from backtest import bootstrap_simulation, scenario_replay, walk_forward_oos
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 app = FastAPI(title="Prediction Market Analytics API")
 
@@ -40,6 +40,7 @@ KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
 ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ODDPOOL_BASE = "https://api.oddpool.com"
 
 # ── In-memory caches ────────────────────────────────────────────────────────────
@@ -48,6 +49,13 @@ TAG_CACHE_TTL = 86_400 # 24 hours (tags rarely change)
 _universe_cache: dict = {"markets": [], "fetched_at": 0.0}
 _history_cache: dict[str, tuple[list, float]] = {}  # conditionId → (history, timestamp)
 _tag_cache: dict = {"tags": [], "fetched_at": 0.0}
+
+# ── News / LLM-analysis cache ─────────────────────────────────────────────────
+# Keyed by a string describing the query (market pair hash or market+date).
+# Value: (result_dict, unix_timestamp).  Avoids re-calling the LLM + web search
+# for identical queries within the TTL window.
+NEWS_CACHE_TTL = 21_600   # 6 hours
+_news_cache: dict[str, tuple[dict, float]] = {}
 
 # ── Semantic embedding helpers ───────────────────────────────────────────────
 _embed_model = None
@@ -1148,6 +1156,81 @@ async def polymarket_history(market_id: str, interval: str = "1m"):
     }
 
 
+@app.get("/markets/polymarket/{market_id}/volume-history")
+async def polymarket_volume_history(market_id: str):
+    """
+    Derive a daily "price-activity" proxy from fine-grained CLOB price history.
+
+    The Polymarket public trade history API only has ~24 h of data, so we cannot
+    use it for historical volume.  Instead we compute two signals from the 1-hour
+    fidelity price history (which covers the full market lifetime):
+
+        range    = max(p) - min(p) within the calendar day
+        momentum = Σ |p[i] - p[i-1]| for all hourly ticks in the day
+
+        activity = range + momentum / 2   (in cents × 100)
+
+    This correctly highlights whale-driven days (large sudden dislocations) and
+    filters out quiet low-volume days, which is exactly what we need for
+    distinguishing "news catalyst" spikes from "whale trade" spikes.
+
+    Returns [{t: unix_day_bucket, v: activity_score}] sorted ascending.
+    The activity score is in "cent-moves" (0–100 scale, roughly) so it is
+    displayable without a dollar-sign label.
+    """
+    try:
+        # Reuse the CLOB prices-history — fidelity=60 gives hourly ticks
+        async with httpx.AsyncClient(timeout=15) as hc:
+            # Need the YES token ID first (same logic as /history endpoint)
+            clob_resp = await hc.get(f"https://clob.polymarket.com/markets/{market_id}")
+            if clob_resp.status_code != 200:
+                return []
+            tokens = clob_resp.json().get("tokens") or []
+            yes_token = next(
+                (t for t in tokens if t.get("outcome", "").lower() == "yes"),
+                tokens[0] if tokens else None,
+            )
+            if not yes_token:
+                return []
+            token_id = yes_token["token_id"]
+
+            # Fetch max-range history at hourly fidelity
+            ph_resp = await hc.get(
+                "https://clob.polymarket.com/prices-history",
+                params={"market": token_id, "interval": "max", "fidelity": 60},
+            )
+            if ph_resp.status_code != 200:
+                return []
+            history = ph_resp.json().get("history", [])
+
+        if len(history) < 2:
+            return []
+
+        # ── Bucket hourly ticks into calendar days ───────────────────────────
+        from collections import defaultdict
+        day_prices: dict[int, list[float]] = defaultdict(list)
+        for pt in history:
+            day = (int(pt["t"]) // 86400) * 86400
+            day_prices[day].append(float(pt["p"]))
+
+        result = []
+        for day in sorted(day_prices):
+            prices = day_prices[day]
+            if len(prices) < 2:
+                continue
+            rng = max(prices) - min(prices)
+            momentum = sum(abs(prices[i] - prices[i - 1]) for i in range(1, len(prices)))
+            activity = round((rng + momentum / 2) * 100, 4)   # convert to cent-moves
+            if activity > 0:
+                result.append({"t": day, "v": activity})
+
+        return result
+
+    except Exception as exc:
+        print(f"[volume-history] error for {market_id}: {exc}")
+        return []
+
+
 @app.get("/correlate")
 async def correlate_markets(market_a: str = Query(...), market_b: str = Query(...)):
     """Fetch daily price histories for two Polymarket markets and run the full correlation pipeline."""
@@ -1812,6 +1895,347 @@ async def run_backtest(req: BacktestRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Logical Correlation (LLM-powered) ─────────────────────────────────────────
+
+class LogicalCorrelationRequest(BaseModel):
+    market_a_question: str
+    market_b_question: str
+    pearson_r: float = 0.0
+    semantic_similarity: float = 0.0
+
+
+class SpikeInvestigationRequest(BaseModel):
+    question: str                # Market question text
+    spike_timestamp: int         # Unix timestamp of the clicked data point
+    spike_price: float           # Price value at the spike (0–1)
+    market_id: str = ""
+
+
+_ANALYSIS_TOOL = {
+    "name": "analyze_logical_correlation",
+    "description": "Record the logical correlation analysis between two prediction markets",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "logical_score": {
+                "type": "number",
+                "description": (
+                    "Float 0.0–1.0. 0=no logical connection, "
+                    "0.5=moderate shared driver, 1.0=direct logical dependency."
+                ),
+            },
+            "relationship_type": {
+                "type": "string",
+                "enum": ["causal", "shared_driver", "thematic", "inverse", "coincidental", "none"],
+                "description": "Nature of the logical relationship.",
+            },
+            "explanation": {
+                "type": "string",
+                "description": "1–2 sentences explaining the relationship in plain English.",
+            },
+        },
+        "required": ["logical_score", "relationship_type", "explanation"],
+    },
+}
+
+_SPIKE_TOOL = {
+    "name": "record_spike_investigation",
+    "description": "Record the findings from investigating a prediction-market price spike",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "events": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "2–4 bullet-point news events or developments from around this date that likely affected the market price.",
+            },
+            "explanation": {
+                "type": "string",
+                "description": "2–3 sentences explaining how those events drove the price movement.",
+            },
+            "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "Confidence in the explanation based on news coverage found.",
+            },
+        },
+        "required": ["events", "explanation", "confidence"],
+    },
+}
+
+
+async def _run_web_search_context(client, query: str, max_tokens: int = 1500) -> tuple[str, str]:
+    """
+    Ask Claude (with server-side web_search enabled) to research `query`.
+    Returns (text_result, error_detail).
+    - text_result: Claude's findings as plain text, or "" if nothing found.
+    - error_detail: non-empty string if the search failed, "" on success.
+    Prints full debug info to stdout so it appears in the uvicorn log.
+    """
+    print(f"\n[web_search] query=\n{query}\n")
+    try:
+        resp = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=max_tokens,
+            tools=[{"type": "web_search_20260209", "name": "web_search"}],
+            messages=[{"role": "user", "content": query}],
+        )
+        print(f"[web_search] stop_reason={resp.stop_reason}  blocks={[type(b).__name__ for b in resp.content]}")
+        text_parts = [b.text for b in resp.content if hasattr(b, "text")]
+        result = "\n".join(text_parts).strip()
+        print(f"[web_search] text_length={len(result)}")
+        if result:
+            print(f"[web_search] first 500 chars:\n{result[:500]}")
+        return result, ""
+    except Exception as exc:
+        err = f"{type(exc).__name__}: {exc}"
+        print(f"[web_search] ERROR: {err}")
+        return "", err
+
+
+async def _analyze_logical_correlation(q_a: str, q_b: str, pearson_r: float, sem_sim: float) -> dict:
+    """
+    Two-step Claude Haiku analysis:
+      1. Web-search for current facts relevant to the two markets (server-side
+         web_search_20260209 tool — no client loop needed).
+      2. Forced tool-call to produce a guaranteed-parseable structured result.
+
+    Results are cached in _news_cache for NEWS_CACHE_TTL seconds so repeated
+    calls for the same market pair skip both the web search and the LLM call.
+
+    Score methodology:
+      0.0–0.2  Coincidental — no logical connection
+      0.2–0.4  Weak thematic link
+      0.4–0.6  Moderate — shared underlying driver
+      0.6–0.8  Strong — clear causal mechanism
+      0.8–1.0  Very strong / direct logical dependency
+    """
+    if not ANTHROPIC_API_KEY:
+        return {
+            "logical_score": 0.0,
+            "relationship_type": "none",
+            "explanation": "Logical analysis unavailable — ANTHROPIC_API_KEY not configured.",
+        }
+
+    # ── Cache check (order-independent key) ──────────────────────────────────
+    pair_key = "|".join(sorted([q_a, q_b]))
+    cache_key = f"logic:{hash(pair_key)}"
+    cached = _news_cache.get(cache_key)
+    if cached and time.time() - cached[1] < NEWS_CACHE_TTL:
+        return cached[0]
+
+    import anthropic  # lazy import
+
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+    # ── Step 1: web-search for current factual context ────────────────────────
+    search_query = (
+        f"Search for current news and facts relevant to these two prediction market questions:\n"
+        f'1. "{q_a}"\n'
+        f'2. "{q_b}"\n\n'
+        f"Find: who currently holds relevant offices, recent polls or economic data, "
+        f"and any news that would help assess whether outcomes are logically connected. "
+        f"Summarise what you find in a few sentences."
+    )
+    factual_context, _search_err = await _run_web_search_context(client, search_query)
+
+    # ── Step 2: structured logical-correlation analysis ───────────────────────
+    context_block = (
+        f"\n\nFactual context retrieved via web search:\n{factual_context}\n"
+        if factual_context else
+        "\n\n(No web-search context available — reason from mechanism only.)\n"
+    )
+
+    analysis_prompt = (
+        f'You are a prediction-market analyst assessing the LOGICAL STRUCTURE of '
+        f'the relationship between two market questions.\n\n'
+        f'Market A: "{q_a}"\n'
+        f'Market B: "{q_b}"\n\n'
+        f'Statistical context (for reference only):\n'
+        f'  Pearson r = {pearson_r:.3f}   |   Semantic similarity = {sem_sim:.2f}'
+        f'{context_block}\n'
+        f'RULES:\n'
+        f'1. Use the factual context above when it applies; otherwise reason from '
+        f'   abstract mechanism.\n'
+        f'2. Keep the explanation to 1–2 sentences.\n\n'
+        f'Score methodology:\n'
+        f'  0.0–0.2  No logical connection\n'
+        f'  0.2–0.4  Weak thematic link\n'
+        f'  0.4–0.6  Moderate (shared driver / indirect chain)\n'
+        f'  0.6–0.8  Strong (clear causal mechanism)\n'
+        f'  0.8–1.0  Very strong / direct dependency\n\n'
+        f'Call analyze_logical_correlation with your assessment.'
+    )
+
+    try:
+        response = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=512,
+            tools=[_ANALYSIS_TOOL],
+            tool_choice={"type": "tool", "name": "analyze_logical_correlation"},
+            messages=[{"role": "user", "content": analysis_prompt}],
+        )
+
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "analyze_logical_correlation":
+                inp = block.input
+                result = {
+                    "logical_score": float(max(0.0, min(1.0, inp.get("logical_score", 0.0)))),
+                    "relationship_type": inp.get("relationship_type", "none"),
+                    "explanation": inp.get("explanation", ""),
+                }
+                _news_cache[cache_key] = (result, time.time())
+                return result
+
+        return {
+            "logical_score": 0.0,
+            "relationship_type": "none",
+            "explanation": "Model did not return a structured response.",
+        }
+
+    except Exception as e:
+        return {
+            "logical_score": 0.0,
+            "relationship_type": "none",
+            "explanation": f"Analysis failed: {str(e)[:120]}",
+        }
+
+
+async def _investigate_spike(question: str, spike_ts: int, spike_price: float, market_id: str = "") -> dict:
+    """
+    Two-step Claude Haiku spike investigation:
+      1. Web-search for news on/around the spike date.
+      2. Forced tool-call → structured events + explanation.
+
+    Results cached by (market_id or question hash) + date string for 24 h.
+    """
+    if not ANTHROPIC_API_KEY:
+        return {
+            "date": datetime.fromtimestamp(spike_ts, tz=timezone.utc).strftime("%b %d, %Y"),
+            "price": spike_price,
+            "events": [],
+            "explanation": "Spike investigation unavailable — ANTHROPIC_API_KEY not configured.",
+            "confidence": "low",
+        }
+
+    spike_date = datetime.fromtimestamp(spike_ts, tz=timezone.utc)
+    date_str   = spike_date.strftime("%Y-%m-%d")
+    date_label = spike_date.strftime("%B %d, %Y")
+    id_key     = market_id or str(hash(question))
+    cache_key  = f"spike:{id_key}:{date_str}"
+
+    cached = _news_cache.get(cache_key)
+    if cached and time.time() - cached[1] < 86_400:   # 24-hour TTL for spike cache
+        return cached[0]
+
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+    # ── Step 1: search for news around the spike date ─────────────────────────
+    search_query = (
+        f"Search for news and events from around {date_label} that would affect "
+        f"this prediction market: \"{question}\".\n\n"
+        f"Look for: breaking news, political developments, economic data releases, "
+        f"polls, announcements, or any other events from {date_label} (±3 days) "
+        f"that are relevant to this market question. List the key events you find."
+    )
+    news_context, search_err = await _run_web_search_context(client, search_query, max_tokens=2000)
+
+    # ── Step 2: structured spike explanation ──────────────────────────────────
+    price_pct = round(spike_price * 100, 1)
+    context_block = (
+        f"\n\nNews context from web search:\n{news_context}\n"
+        if news_context else
+        "\n\n(No web-search context found for this date.)\n"
+    )
+
+    analysis_prompt = (
+        f'You are a prediction-market analyst explaining a price movement.\n\n'
+        f'Market: "{question}"\n'
+        f'Date of price spike: {date_label}\n'
+        f'Price at that point: {price_pct}¢\n'
+        f'{context_block}\n'
+        f'Based on the news context above, identify 2–4 specific events from '
+        f'around {date_label} that likely caused or contributed to this price level, '
+        f'and explain in 2–3 sentences how those events connect to the market outcome.\n\n'
+        f'If no relevant news was found, say so clearly and set confidence to "low".\n\n'
+        f'Call record_spike_investigation with your findings.'
+    )
+
+    try:
+        response = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=600,
+            tools=[_SPIKE_TOOL],
+            tool_choice={"type": "tool", "name": "record_spike_investigation"},
+            messages=[{"role": "user", "content": analysis_prompt}],
+        )
+
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "record_spike_investigation":
+                inp = block.input
+                result = {
+                    "date": date_label,
+                    "price": spike_price,
+                    "events": inp.get("events", []),
+                    "explanation": inp.get("explanation", ""),
+                    "confidence": inp.get("confidence", "low"),
+                    # Debug fields — visible in UI's expandable section
+                    "search_query": search_query,
+                    "raw_context": news_context or f"(empty — search error: {search_err})" if search_err else "(empty — no results returned)",
+                }
+                _news_cache[cache_key] = (result, time.time())
+                return result
+
+        return {
+            "date": date_label, "price": spike_price,
+            "events": [], "explanation": "Model did not return a structured response.",
+            "confidence": "low",
+            "search_query": search_query,
+            "raw_context": news_context or "(empty)",
+        }
+
+    except Exception as e:
+        return {
+            "date": date_label, "price": spike_price,
+            "events": [], "explanation": f"Investigation failed: {str(e)[:120]}",
+            "confidence": "low",
+            "search_query": search_query,
+            "raw_context": f"Step 2 error: {str(e)}",
+        }
+
+
+@app.post("/markets/logical-correlation")
+async def logical_correlation_endpoint(req: LogicalCorrelationRequest):
+    """
+    LLM-powered logical correlation analysis.
+    Step 1: web-search for current facts.
+    Step 2: Claude Haiku forced tool-call → guaranteed-parseable JSON.
+    Results cached 6 h per market pair.
+    """
+    if not req.market_a_question.strip() or not req.market_b_question.strip():
+        raise HTTPException(400, "market_a_question and market_b_question are required")
+    return await _analyze_logical_correlation(
+        req.market_a_question, req.market_b_question,
+        req.pearson_r, req.semantic_similarity,
+    )
+
+
+@app.post("/markets/spike-investigation")
+async def spike_investigation_endpoint(req: SpikeInvestigationRequest):
+    """
+    Given a market question + Unix timestamp, web-searches news from that date
+    and returns a structured explanation of the price movement.
+    Results cached 24 h per market+date combination.
+    """
+    if not req.question.strip():
+        raise HTTPException(400, "question is required")
+    return await _investigate_spike(
+        req.question, req.spike_timestamp, req.spike_price, req.market_id,
+    )
 
 
 # ── Serve React frontend (production) ─────────────────────────────────────────
