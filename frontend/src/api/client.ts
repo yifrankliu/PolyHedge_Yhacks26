@@ -4,30 +4,6 @@ const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
 });
 
-export interface WhatIfRequest {
-  market_price: number;
-  user_probability: number;
-  position_size: number;
-  days_to_resolution: number;
-}
-
-export interface PayoffPoint {
-  probability: number;
-  pnl: number;
-}
-
-export interface WhatIfResponse {
-  payoff_curve: PayoffPoint[];
-  kelly_fraction: number;
-  half_kelly: number;
-  annualized_return: number;
-  max_profit: number;
-  max_loss: number;
-  breakeven_probability: number;
-  expected_value: number;
-  edge: number;
-}
-
 export interface Market {
   id: string;
   question: string;
@@ -36,9 +12,6 @@ export interface Market {
   end_date: string | null;
   source: 'polymarket' | 'kalshi';
 }
-
-export const whatif = (req: WhatIfRequest) =>
-  api.post<WhatIfResponse>('/whatif', req).then((r) => r.data);
 
 export const searchPolymarket = (search: string) =>
   api.get<Market[]>('/markets/polymarket', { params: { search } }).then((r) => r.data);
@@ -149,3 +122,60 @@ export interface VolSurfaceResponse {
 
 export const getVolSurface = (asset: string) =>
   api.get<VolSurfaceResponse>('/vol-surface', { params: { asset } }).then((r) => r.data);
+
+// ── Hedge Scanner ──────────────────────────────────────────────────────────────
+
+export interface HedgeRequest {
+  market_id: string;
+  direction: 'YES' | 'NO';
+  entry_price: number;
+  current_price: number;
+  position_size: number;
+  search_query: string;
+  asset?: string;
+  threshold?: number;
+  expiry?: string;
+}
+
+export interface HedgeRecommendation {
+  candidate_market_id: string;
+  question: string;
+  current_price: number;
+  platform: string;
+  hedge_direction: 'YES' | 'NO';
+  hedge_ratio: number;
+  recommended_size: number;
+  correlation: number;
+  full_pearson: number;
+  rolling_std: number;
+  lead_direction: string;
+  shared_history_days: number;
+  n_observations: number;
+  composite_score: number;
+  bl_divergence: number | null;
+  bl_confidence: number | null;
+  hedge_confidence: number;
+  confidence_label: string;
+  caveats: string[];
+  stability_discounted: boolean;
+}
+
+export interface BLSignalOut {
+  bl_prob: number;
+  bl_divergence: number;
+  bl_confidence: number;
+  bl_direction: string;
+  spot: number | null;
+  strikes_used: number;
+  strike_range: number[];
+}
+
+export interface HedgeResponse {
+  position_market_id: string;
+  recommendations: HedgeRecommendation[];
+  bl_signal: BLSignalOut | null;
+  errors: Record<string, string>;
+}
+
+export const scanHedges = (req: HedgeRequest) =>
+  api.post<HedgeResponse>('/hedge', req).then((r) => r.data);

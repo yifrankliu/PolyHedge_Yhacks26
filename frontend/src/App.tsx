@@ -1,20 +1,19 @@
 import { useState } from 'react';
-import WhatIfAnalyzer from './components/WhatIfAnalyzer';
 import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
 import PortfolioInputPage from './components/PortfolioInputPage';
+import HedgeScanner from './components/HedgeScanner';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
-  { id: 'whatif', label: 'What-If Analyzer' },
+  { id: 'portfolio', label: 'Position Input' },
   { id: 'bl', label: 'Prob Comparison' },
   { id: 'compare', label: 'Market Comparator' },
-  { id: 'portfolio', label: 'Position Input' },
-  { id: 'hedge', label: 'Hedge Scanner', disabled: true },
+  { id: 'hedge', label: 'Hedge Scanner' },
 ];
 
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('whatif');
+  const [activeTab, setActiveTab] = useState('portfolio');
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -65,10 +64,10 @@ export default function App() {
 
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {activeTab === 'whatif' && <WhatIfAnalyzer />}
+        {activeTab === 'portfolio' && <PortfolioInputPage />}
         {activeTab === 'bl' && <BLComparison />}
         {activeTab === 'compare' && <MarketCompare />}
-        {activeTab === 'portfolio' && <PortfolioInputPage />}
+        {activeTab === 'hedge' && <HedgeScanner />}
       </main>
     </div>
   );
