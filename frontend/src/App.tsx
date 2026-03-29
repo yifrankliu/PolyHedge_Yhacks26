@@ -16,8 +16,6 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'stress', label: 'Stress Test' },
 ];
 
-
-
 export default function App() {
   const [activeTab, setActiveTab] = useState('portfolio');
   const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
@@ -56,7 +54,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">
-              PredictionAnalytics
+              PolyHedge
             </h1>
             <p className="text-xs text-gray-500">
               TradFi-grade tools for prediction markets
@@ -99,13 +97,12 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
         {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
-{activeTab === 'compare' && (
+        {activeTab === 'compare' && (
           <MarketCompare
             initialMarketA={pendingMarketA ?? undefined}
             initialMarketB={pendingMarketB ?? undefined}
           />
         )}
-        {/* Scanner and Hedge Scanner stay mounted to preserve results; hidden when inactive */}
         <div style={{ display: activeTab === 'scanner' ? 'block' : 'none' }}>
           <CorrelationScanner onCompare={handleCompare} />
         </div>
