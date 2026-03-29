@@ -16,7 +16,8 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
 
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('whatif');
+  const [activeTab, setActiveTab] = useState('portfolio');
+  const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
   const [pendingMarketA, setPendingMarketA] = useState<Market | null>(null);
   const [pendingMarketB, setPendingMarketB] = useState<Market | null>(null);
 
@@ -24,8 +25,7 @@ export default function App() {
     setPendingMarketA(target);
     setPendingMarketB(correlated);
     setActiveTab('compare');
-  const [activeTab, setActiveTab] = useState('portfolio');
-  const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
+  };
 
   const handleScanHedges = (positions: PortfolioPosition[]) => {
     setHedgePositions(positions);
