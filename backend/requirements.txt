@@ -3,6 +3,9 @@ uvicorn
 httpx
 numpy
 scipy
+pandas
+statsmodels
+sentence-transformers
 python-dotenv
 pydantic
 pykalshi

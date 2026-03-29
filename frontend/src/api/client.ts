@@ -15,7 +15,6 @@ export interface Market {
 
 export const searchPolymarket = (search: string) =>
   api.get<Market[]>('/markets/polymarket', { params: { search } }).then((r) => r.data);
-  console.log("executed searchPolymarket");
 
 export const searchKalshi = (search: string) =>
   api.get<Market[]>('/markets/kalshi', { params: { search } }).then((r) => r.data);
@@ -63,6 +62,9 @@ export interface MarketHistory {
   history: PricePoint[];
 }
 
+export const lookupPolymarketBySlug = (slug: string) =>
+  api.get<Market[]>('/markets/polymarket/by-slug', { params: { slug } }).then(r => r.data);
+
 export const getPolymarketHistory = (marketId: string, interval = '1m') =>
   api.get<MarketHistory>(`/markets/polymarket/${marketId}/history`, { params: { interval } }).then(r => r.data);
 
@@ -93,12 +95,31 @@ export interface CorrelationResult {
   granger_dominant_direction: string | null;
   low_volume_warning: boolean;
   short_history_warning: boolean;
+  resolution_convergence: boolean;
+  semantic_similarity: number;
+  end_date_proximity: number;
   composite_score: number;
   error?: string;
 }
 
 export const correlateMarkets = (marketA: string, marketB: string) =>
   api.get<CorrelationResult>('/correlate', { params: { market_a: marketA, market_b: marketB } }).then(r => r.data);
+
+export interface PolymarketTag {
+  id: number;
+  slug: string;
+  label: string;
+  count: number;
+}
+
+export const listPolymarketTags = () =>
+  api.get<PolymarketTag[]>('/markets/tags').then(r => r.data);
+
+export const searchPolymarketUnified = (q: string) =>
+  api.get<Market[]>('/markets/polymarket/search', { params: { q } }).then(r => r.data);
+
+export const marketsByTag = (tagId: number, limit = 20) =>
+  api.get<Market[]>('/markets/polymarket/by-tag', { params: { tag_id: tagId, limit } }).then(r => r.data);
 
 export const blComparison = (params: {
   asset: string;

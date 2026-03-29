@@ -161,6 +161,8 @@ def correlate(
     market_b_id: str,
     history_a: list[dict],
     history_b: list[dict],
+    semantic_similarity: float = 0.0,
+    end_date_proximity: float = 0.0,
 ) -> dict | None:
     sa, sb = align_series(history_a, history_b)
 
@@ -175,6 +177,28 @@ def correlate(
 
     dates = sa.index
     pa, pb = sa.values, sb.values
+
+    # ── Data quality guards ────────────────────────────────────────────────────
+    # Reject series with too little price variation (constant or near-constant =
+    # LOCF-filled sparse markets or newly created markets with 1–2 trades)
+    if np.std(pa) < 0.005 or np.std(pb) < 0.005:
+        return {
+            "market_a": market_a_id,
+            "market_b": market_b_id,
+            "short_history_warning": True,
+            "n_observations": len(pa),
+            "error": "Insufficient price variation (likely sparse or constant series)",
+        }
+
+    # Detect resolution convergence: both markets effectively resolved near 0 or 1
+    # This causes spurious Pearson correlation (both moved 0.5→1 or 0.5→0 together)
+    final_a, final_b = float(pa[-1]), float(pb[-1])
+    resolution_convergence = (
+        (final_a > 0.92 and final_b > 0.92) or
+        (final_a < 0.08 and final_b < 0.08) or
+        (final_a > 0.92 and final_b < 0.08) or
+        (final_a < 0.08 and final_b > 0.92)
+    )
 
     # Logit levels and returns
     lx = logit(pa)
@@ -236,10 +260,23 @@ def correlate(
 
     # ── Composite score ───────────────────────────────────────────────────────
     base = abs(full_pearson)
-    stability_bonus = max(0, 0.2 - rolling_std) / 0.2 * 0.2
-    granger_bonus   = 0.15 if min(a_causes_b, b_causes_a) < 0.05 else 0
-    history_penalty = 0.3 if short_history_warning else 0
-    composite = float(np.clip(base + stability_bonus + granger_bonus - history_penalty, 0, 1))
+    stability_bonus  = max(0, 0.2 - rolling_std) / 0.2 * 0.2
+    granger_bonus    = 0.15 if min(a_causes_b, b_causes_a) < 0.05 else 0
+    # Semantic similarity: MiniLM cosine scores are ~0.1 floor for random pairs,
+    # ~0.8+ for near-identical questions. Normalise that range to a 0→0.15 bonus.
+    sem_sim_clamped  = float(np.clip(semantic_similarity, 0.0, 1.0))
+    semantic_bonus   = max(0.0, (sem_sim_clamped - 0.10) / 0.70) * 0.15
+    # End-date proximity: markets resolving close together are more likely related.
+    end_date_bonus   = float(np.clip(end_date_proximity, 0.0, 1.0)) * 0.08
+    history_penalty  = 0.3 if short_history_warning else 0
+    # Resolution convergence: both markets converged to 0/1 — correlation is likely
+    # spurious (driven by shared resolution direction, not shared information flow)
+    convergence_penalty = 0.35 if resolution_convergence else 0
+    composite = float(np.clip(
+        base + stability_bonus + granger_bonus + semantic_bonus + end_date_bonus
+        - history_penalty - convergence_penalty,
+        0, 1,
+    ))
 
     sigma_a = float(np.std(rx[mask_r])) if mask_r.sum() > 1 else 0.0
     sigma_b = float(np.std(ry[mask_r])) if mask_r.sum() > 1 else 0.0
@@ -275,6 +312,10 @@ def correlate(
         # Data quality
         "low_volume_warning": low_volume_warning,
         "short_history_warning": short_history_warning,
+        "resolution_convergence": resolution_convergence,
+        # Semantic
+        "semantic_similarity": round(sem_sim_clamped, 4),
+        "end_date_proximity": round(float(np.clip(end_date_proximity, 0.0, 1.0)), 4),
         # Composite
         "composite_score": round(composite, 4),
     }

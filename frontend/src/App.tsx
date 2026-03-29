@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
+import CorrelationScanner from './components/CorrelationScanner';
+import { Market } from './api/client';
 import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInputPage';
 import HedgeScanner from './components/HedgeScanner';
 
@@ -8,11 +10,20 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'portfolio', label: 'Position Input' },
   { id: 'bl', label: 'Prob Comparison' },
   { id: 'compare', label: 'Market Comparator' },
+  { id: 'scanner', label: 'Correlation Scanner' },
   { id: 'hedge', label: 'Hedge Scanner' },
 ];
 
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState('whatif');
+  const [pendingMarketA, setPendingMarketA] = useState<Market | null>(null);
+  const [pendingMarketB, setPendingMarketB] = useState<Market | null>(null);
+
+  const handleCompare = (target: Market, correlated: Market) => {
+    setPendingMarketA(target);
+    setPendingMarketB(correlated);
+    setActiveTab('compare');
   const [activeTab, setActiveTab] = useState('portfolio');
   const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
 
@@ -72,7 +83,16 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-6 py-8">
         {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
         {activeTab === 'bl' && <BLComparison />}
-        {activeTab === 'compare' && <MarketCompare />}
+        {activeTab === 'compare' && (
+          <MarketCompare
+            initialMarketA={pendingMarketA ?? undefined}
+            initialMarketB={pendingMarketB ?? undefined}
+          />
+        )}
+        {/* Scanner stays mounted to preserve results; hidden when inactive */}
+        <div style={{ display: activeTab === 'scanner' ? 'block' : 'none' }}>
+          <CorrelationScanner onCompare={handleCompare} />
+        </div>
         {activeTab === 'hedge' && <HedgeScanner initialPositions={hedgePositions} />}
       </main>
     </div>

@@ -12,7 +12,8 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { searchPolymarket, getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+import { getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+import MarketSearchWidget from './MarketSearchWidget';
 
 const INTERVALS = [
   { label: '1W', value: '1w' },
@@ -20,94 +21,6 @@ const INTERVALS = [
   { label: '3M', value: '3m' },
   { label: 'All', value: 'max' },
 ];
-
-function MarketPicker({
-  label,
-  color,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  color: string;
-  selected: Market | null;
-  onSelect: (m: Market) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const search = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    try {
-      setResults(await searchPolymarket(query));
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-900 rounded-xl p-5 border border-gray-700">
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`w-3 h-3 rounded-full`} style={{ backgroundColor: color }} />
-        <h3 className="text-sm font-semibold text-gray-200 uppercase tracking-wider">{label}</h3>
-      </div>
-
-      {selected && (
-        <div className="mb-3 p-3 rounded-lg bg-gray-800 border border-gray-600">
-          <p className="text-sm text-white font-medium leading-snug">{selected.question}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {selected.price != null ? `${(selected.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-            {selected.end_date ? new Date(selected.end_date).toLocaleDateString() : '?'}
-          </p>
-          <button
-            onClick={() => onSelect({ ...selected, id: '' } as any)}
-            className="text-xs text-gray-500 hover:text-gray-300 mt-1"
-          >
-            Change market
-          </button>
-        </div>
-      )}
-
-      <div className="flex gap-2 mb-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && search()}
-          placeholder="Search Polymarket..."
-          className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
-        />
-        <button
-          onClick={search}
-          disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-        >
-          {loading ? '...' : 'Search'}
-        </button>
-      </div>
-
-      {results.length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 max-h-52 overflow-y-auto">
-          {results.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => { onSelect(m); setResults([]); setQuery(''); }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
-            >
-              <p className="text-sm text-white truncate">{m.question}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {m.price != null ? `${(m.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-                ends {m.end_date ? new Date(m.end_date).toLocaleDateString() : '?'}
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -284,6 +197,9 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
           {result.break_detected && (
             <span className="text-xs bg-orange-900 text-orange-300 px-2 py-0.5 rounded">Regime break detected</span>
           )}
+          {result.resolution_convergence && (
+            <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded">⚠ Resolution convergence — correlation may be spurious</span>
+          )}
           <span className="text-xs text-gray-500">{result.shared_history_days}d shared · {result.n_observations} obs</span>
         </div>
       </div>
@@ -308,9 +224,65 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
         <div className="bg-gray-800 rounded-lg p-3">
           <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Granger Causality</p>
           <p className="text-sm font-bold text-white leading-tight mt-1">{grangerLabel()}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Composite: {score.toFixed(2)}</p>
+          <p className="text-xs text-gray-500 mt-0.5">A→B: {result.a_causes_b_pval.toFixed(3)} · B→A: {result.b_causes_a_pval.toFixed(3)}</p>
         </div>
       </div>
+
+      {/* Semantic + composite row */}
+      {(result.semantic_similarity != null) && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-gray-800 rounded-lg p-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Semantic Similarity</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.round(Math.max(0, Math.min(1, (result.semantic_similarity - 0.1) / 0.7)) * 100)}%`,
+                    backgroundColor: result.semantic_similarity > 0.55 ? '#818cf8' : result.semantic_similarity > 0.35 ? '#a78bfa' : '#6b7280',
+                  }}
+                />
+              </div>
+              <span className="text-sm font-bold text-white font-mono">{result.semantic_similarity.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {result.semantic_similarity > 0.55 ? 'Strongly related topic' :
+               result.semantic_similarity > 0.35 ? 'Moderately related' : 'Topically dissimilar'}
+            </p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Resolution Proximity</p>
+            <p className="text-xl font-bold text-white mt-1">
+              {result.end_date_proximity > 0
+                ? `${Math.round(result.end_date_proximity * 100)}%`
+                : '—'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {result.end_date_proximity > 0.9 ? 'Same resolution window' :
+               result.end_date_proximity > 0.5 ? 'Close resolution dates' :
+               result.end_date_proximity > 0 ? 'Divergent timelines' : 'No date data'}
+            </p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 md:col-span-1">
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Composite Score</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.round(score * 100)}%`,
+                    backgroundColor: score > 0.6 ? '#34d399' : score > 0.35 ? '#fbbf24' : '#9ca3af',
+                  }}
+                />
+              </div>
+              <span className="text-sm font-bold text-white font-mono">{score.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Pearson + stability + Granger + semantic + proximity
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Structural break info */}
       {result.break_detected && result.pre_break_pearson !== null && (
@@ -383,7 +355,7 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
   );
 }
 
-export default function MarketCompare() {
+export default function MarketCompare({ initialMarketA, initialMarketB }: { initialMarketA?: Market; initialMarketB?: Market }) {
   const [marketA, setMarketA] = useState<Market | null>(null);
   const [marketB, setMarketB] = useState<Market | null>(null);
   const [historyA, setHistoryA] = useState<MarketHistory | null>(null);
@@ -438,6 +410,17 @@ export default function MarketCompare() {
     fetchHistory(m, 'B', interval);
   };
 
+  // Pre-populate markets when navigating from Correlation Scanner
+  useEffect(() => {
+    if (initialMarketA?.id) handleSelectA(initialMarketA);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMarketA?.id]);
+
+  useEffect(() => {
+    if (initialMarketB?.id) handleSelectB(initialMarketB);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMarketB?.id]);
+
   const handleIntervalChange = (iv: string) => {
     setInterval(iv);
     if (marketA?.id) fetchHistory(marketA, 'A', iv);
@@ -458,8 +441,8 @@ export default function MarketCompare() {
 
       {/* Market pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <MarketPicker label="Market A" color={MARKET_A_COLOR} selected={marketA} onSelect={handleSelectA} />
-        <MarketPicker label="Market B" color={MARKET_B_COLOR} selected={marketB} onSelect={handleSelectB} />
+        <MarketSearchWidget label="Market A" accentColor={MARKET_A_COLOR} selected={marketA} onSelect={handleSelectA} />
+        <MarketSearchWidget label="Market B" accentColor={MARKET_B_COLOR} selected={marketB} onSelect={handleSelectB} />
       </div>
 
       {/* Time range selector */}
