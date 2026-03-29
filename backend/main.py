@@ -16,11 +16,7 @@ from dotenv import load_dotenv
 
 from bl_pipeline import bl_pipeline, fetch_vol_surface
 from correlation import correlate
-from hedge import (
-    bl_confidence as compute_bl_confidence,
-    compute_hedge_ratio,
-    composite_hedge_score,
-)
+from rigorous_hedge import rigorous_event_hedge
 from rigorous_hedge import rigorous_event_hedge
 
 load_dotenv()
@@ -1312,7 +1308,7 @@ async def hedge_scanner(req: HedgeRequest):
             bl_result = await bl_pipeline(req.asset, req.threshold, req.expiry)
             bl_div = bl_result["prob"] - req.current_price
             T_days = bl_result["T_years"] * 365
-            bl_conf = compute_bl_confidence(bl_result, req.threshold, T_days, bl_div)
+            bl_conf = min(1.0, abs(bl_div) / 0.10) * min(1.0, bl_result.get("strikes_used", 0) / 20.0)
             bl_signal_out = BLSignalOut(
                 bl_prob=bl_result["prob"],
                 bl_divergence=round(bl_div, 4),
@@ -1388,32 +1384,28 @@ async def hedge_scanner(req: HedgeRequest):
         if corr is None or corr.get("error"):
             continue
 
-        sigma_a = corr.get("sigma_logit_returns_a", 0.0)
-        sigma_b = corr.get("sigma_logit_returns_b", 0.0)
+        rigorous = rigorous_event_hedge(user_history, hist)
+        if rigorous.get("error"):
+            continue
 
-        hedge_info = compute_hedge_ratio(
-            full_pearson_returns=corr["full_pearson_returns"],
-            sigma_a=sigma_a,
-            sigma_b=sigma_b,
-            rolling_std=corr["rolling_std"],
-            break_detected=corr["break_detected"],
-            position_size=req.position_size,
-            direction=req.direction,
-            bl_divergence=bl_div,
-            bl_conf=bl_conf,
-        )
+        raw_ratio = rigorous["hedge_ratio"]
+        abs_ratio = float(abs(raw_ratio))
+        position_sign = 1 if req.direction == "YES" else -1
+        hedge_direction = "NO" if (raw_ratio * position_sign) < 0 else "YES"
 
-        hedge_score, confidence_label, caveats = composite_hedge_score(
-            corr_composite=corr["composite_score"],
-            shared_history_days=corr["shared_history_days"],
-            bl_confidence_score=bl_conf,
-            bl_divergence=bl_div,
-        )
+        hedge_score = rigorous["confidence"]
+        if hedge_score > 0.70:
+            confidence_label = "High confidence"
+        elif hedge_score > 0.45:
+            confidence_label = "Moderate confidence"
+        else:
+            confidence_label = "Weak signal"
 
+        caveats = list(rigorous.get("notes", []))
         if corr["break_detected"]:
             caveats.append("Regime break detected — correlation may have shifted")
         if corr["rolling_std"] > 0.3:
-            caveats.append("Unstable rolling correlation — stability discount applied")
+            caveats.append("Unstable rolling correlation")
         if bl_signal_out and bl_signal_out.bl_direction == "pm_overpriced":
             caveats.append("Polymarket > Deribit — may reflect one-touch vs European structure")
 
@@ -1422,22 +1414,22 @@ async def hedge_scanner(req: HedgeRequest):
             question=candidate["question"],
             current_price=candidate["price"],
             platform="polymarket",
-            hedge_direction=hedge_info["hedge_direction"],
-            hedge_ratio=hedge_info["hedge_ratio"],
-            recommended_size=hedge_info["recommended_size"],
+            hedge_direction=hedge_direction,
+            hedge_ratio=round(abs_ratio, 4),
+            recommended_size=round(abs_ratio * req.position_size, 2),
             correlation=corr["full_pearson_returns"],
             full_pearson=corr["full_pearson"],
             rolling_std=corr["rolling_std"],
             lead_direction=corr["lead_direction"],
-            shared_history_days=corr["shared_history_days"],
-            n_observations=corr["n_observations"],
-            composite_score=corr["composite_score"],
+            shared_history_days=float(rigorous["n_shared_days"]),
+            n_observations=rigorous["n_returns"],
+            composite_score=rigorous["confidence"],
             bl_divergence=round(bl_div, 4) if bl_div is not None else None,
             bl_confidence=bl_conf,
             hedge_confidence=hedge_score,
             confidence_label=confidence_label,
             caveats=caveats,
-            stability_discounted=hedge_info.get("stability_discounted", False),
+            stability_discounted=corr["rolling_std"] > 0.3 or corr["break_detected"],
         ))
 
     recommendations.sort(key=lambda x: -x.hedge_confidence)
