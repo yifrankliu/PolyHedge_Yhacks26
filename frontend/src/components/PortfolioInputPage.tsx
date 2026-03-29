@@ -1,11 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Market,
+  getPolymarketHistory,
   getKalshiMarket,
   getPolymarketMarket,
   searchKalshi,
   searchPolymarket,
 } from '../api/client';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 type Source = 'polymarket' | 'kalshi';
 type Side = 'YES' | 'NO';
@@ -124,6 +134,9 @@ const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
 };
 
 const formatCents = (value: number) => value.toFixed(1);
+const toMillis = (t: number) => (t < 1_000_000_000_000 ? t * 1000 : t);
+const formatTime = (t: number) =>
+  new Date(toMillis(t)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (positions: PortfolioPosition[]) => void }) {
   const [positionInputMode, setPositionInputMode] = useState<MarketInputMode>('search');
@@ -154,13 +167,70 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   const [minCorrelation, setMinCorrelation] = useState('0.35');
 
   const [formError, setFormError] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [graphMarketId, setGraphMarketId] = useState('');
+  const [graphInterval, setGraphInterval] = useState<'1m' | '1w' | 'max'>('1w');
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState('');
+  const [graphSeries, setGraphSeries] = useState<Array<{ t: number; p: number }>>([]);
+  const [graphCurrentPrice, setGraphCurrentPrice] = useState<number | null>(null);
 
   const liveEntryPriceCents = useMemo(() => {
     if (!positionMarket || positionMarket.market_price_cents == null) return null;
     const yesPrice = positionMarket.market_price_cents;
     return side === 'YES' ? yesPrice : Math.max(0, 100 - yesPrice);
   }, [positionMarket, side]);
+
+  const graphCandidates = useMemo(() => {
+    const map = new Map<string, string>();
+    if (positionMarket?.source === 'polymarket') {
+      map.set(positionMarket.market_id, positionMarket.question);
+    }
+    positions
+      .filter((position) => position.source === 'polymarket')
+      .forEach((position) => map.set(position.market_id, position.market_question));
+    return Array.from(map.entries()).map(([id, question]) => ({ id, question }));
+  }, [positionMarket, positions]);
+
+  useEffect(() => {
+    if (!graphCandidates.length) {
+      setGraphMarketId('');
+      setGraphSeries([]);
+      setGraphCurrentPrice(null);
+      setGraphError('');
+      return;
+    }
+    const stillValid = graphCandidates.some((candidate) => candidate.id === graphMarketId);
+    if (!graphMarketId || !stillValid) {
+      setGraphMarketId(graphCandidates[0].id);
+    }
+  }, [graphCandidates, graphMarketId]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!graphMarketId) return;
+      setGraphLoading(true);
+      setGraphError('');
+      try {
+        const res = await getPolymarketHistory(graphMarketId, graphInterval);
+        const points = (res.history || [])
+          .map((point) => ({ t: Number(point.t), p: Number(point.p) * 100 }))
+          .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p));
+        setGraphSeries(points);
+        setGraphCurrentPrice(
+          res.current_price != null && Number.isFinite(Number(res.current_price))
+            ? Number(res.current_price) * 100
+            : null,
+        );
+      } catch {
+        setGraphSeries([]);
+        setGraphCurrentPrice(null);
+        setGraphError('Could not load market history.');
+      } finally {
+        setGraphLoading(false);
+      }
+    };
+    load();
+  }, [graphInterval, graphMarketId]);
 
   const applySelectedMarket = (market: Market, source: Source) => {
     setPositionMarket({
@@ -237,38 +307,6 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
     setSide('YES');
     setManualMarketId('');
     setManualError('');
-  };
-
-  const selectedGoals = useMemo(() => {
-    const goals: string[] = [];
-    if (goalHedge) goals.push('hedge_correlated_exposure');
-    if (goalArb) goals.push('find_arbitrage_like_spreads');
-    if (goalDownside) goals.push('minimize_downside_risk');
-    if (goalPnL) goals.push('show_scenario_pnl_visualizations');
-    return goals;
-  }, [goalArb, goalDownside, goalHedge, goalPnL]);
-
-  const payload = useMemo(
-    () => ({
-      positions,
-      preferences: {
-        goals: selectedGoals,
-        max_recommendations: Number(maxNewPositions) || 3,
-        hedge_budget_usd: Number(hedgeBudgetUsd) || 0,
-        min_correlation_score: Number(minCorrelation) || 0,
-      },
-    }),
-    [hedgeBudgetUsd, maxNewPositions, minCorrelation, positions, selectedGoals],
-  );
-
-  const copyPayload = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-    }
   };
 
   return (
@@ -597,18 +635,82 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
           </div>
 
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-200">Backend Payload Preview</p>
-              <button
-                onClick={copyPayload}
-                className="text-xs bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded text-gray-200"
-              >
-                {copied ? 'Copied' : 'Copy JSON'}
-              </button>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-sm font-semibold text-gray-200">Market Graph</p>
+              {graphCandidates.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={graphMarketId}
+                    onChange={(e) => setGraphMarketId(e.target.value)}
+                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 max-w-[220px]"
+                  >
+                    {graphCandidates.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.question}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={graphInterval}
+                    onChange={(e) => setGraphInterval(e.target.value as '1m' | '1w' | 'max')}
+                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600"
+                  >
+                    <option value="1m">1m</option>
+                    <option value="1w">1w</option>
+                    <option value="max">max</option>
+                  </select>
+                </div>
+              )}
             </div>
-            <pre className="mt-3 bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto">
-              {JSON.stringify(payload, null, 2)}
-            </pre>
+
+            {graphCandidates.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                Select a Polymarket market to view its price history.
+              </p>
+            ) : graphLoading ? (
+              <p className="text-sm text-gray-400">Loading history...</p>
+            ) : graphError ? (
+              <p className="text-sm text-red-400">{graphError}</p>
+            ) : graphSeries.length === 0 ? (
+              <p className="text-sm text-gray-500">No history data available for this market.</p>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={graphSeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <XAxis
+                      dataKey="t"
+                      tickFormatter={formatTime}
+                      stroke="#6b7280"
+                      tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${Number(v).toFixed(0)}¢`}
+                      stroke="#6b7280"
+                      tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    />
+                    <Tooltip
+                      formatter={(value: any) => [`${Number(value).toFixed(2)}¢`, 'YES price']}
+                      labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
+                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
+                      labelStyle={{ color: '#9ca3af' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="p"
+                      stroke="#818cf8"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+                <p className="text-xs text-gray-500 mt-2">
+                  Current YES price: {graphCurrentPrice != null ? `${graphCurrentPrice.toFixed(2)}¢` : 'N/A'}
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
