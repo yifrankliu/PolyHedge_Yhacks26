@@ -617,8 +617,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
         <button
           onClick={() => onScanHedges(positions)}
           disabled={positions.length === 0}
-          className="w-full py-4 rounded-xl font-bold text-base tracking-wide transition-colors disabled:opacity-40 text-white"
-          style={{ backgroundColor: positions.length === 0 ? undefined : '#0d1b3e', background: positions.length > 0 ? 'linear-gradient(135deg, #0d1b3e 0%, #1a2f6b 100%)' : undefined }}
+          className="w-full py-4 rounded-xl font-bold text-base tracking-wide disabled:opacity-40 text-white bg-gradient-to-r from-indigo-900 via-indigo-700 to-indigo-600 hover:from-indigo-800 hover:via-indigo-600 hover:to-indigo-500 transition-all"
         >
           Scan for Hedges →
         </button>
