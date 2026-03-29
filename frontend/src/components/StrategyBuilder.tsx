@@ -121,15 +121,17 @@ function ChartTooltip({ active, payload, label }: any) {
 interface Props {
   positions: PortfolioPosition[];
   recommendations: HedgeRecommendation[];
+  onTestStrategy?: (pos: PortfolioPosition, hedge: HedgeRecommendation) => void;
 }
 
-export default function StrategyBuilder({ positions, recommendations }: Props) {
+export default function StrategyBuilder({ positions, recommendations, onTestStrategy }: Props) {
   const pos = positions[0] ?? null;
 
   const [strategies, setStrategies] = useState<Strategy[]>([
     { id: 'S1', label: 'Strategy 1', hedges: [] },
   ]);
   const [activeId, setActiveId] = useState('S1');
+  const [backtestHedgeId, setBacktestHedgeId] = useState<string | null>(null);
 
   const activeStrategy = strategies.find(s => s.id === activeId) ?? strategies[0];
   // Use entry price as a proxy for current market price of A
@@ -653,6 +655,58 @@ export default function StrategyBuilder({ positions, recommendations }: Props) {
           )}
         </div>
       </div>
+
+      {/* ── Stress Test section ── */}
+      {activeStrategy.hedges.length > 0 && pos && (
+        <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
+                Stress Test
+              </h3>
+              <p className="text-[10px] text-zinc-600 mt-0.5">
+                Select a hedge to stress-test, then open the testing dashboard
+              </p>
+            </div>
+          </div>
+
+          {/* Hedge selector chips */}
+          <div className="flex flex-wrap gap-2 mb-5">
+            {activeStrategy.hedges.map(h => {
+              const active = backtestHedgeId === h.candidate_market_id;
+              return (
+                <button
+                  key={h.candidate_market_id}
+                  onClick={() => setBacktestHedgeId(active ? null : h.candidate_market_id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    active
+                      ? 'bg-indigo-900/50 border-indigo-600 text-indigo-300'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <span className={`mr-1 ${h.hedge_direction === 'YES' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {h.hedge_direction}
+                  </span>
+                  {h.question.length > 45 ? h.question.slice(0, 45) + '…' : h.question}
+                </button>
+              );
+            })}
+          </div>
+
+          {backtestHedgeId && (() => {
+            const h = activeStrategy.hedges.find(hh => hh.candidate_market_id === backtestHedgeId);
+            if (!h) return null;
+            return (
+              <button
+                onClick={() => onTestStrategy?.(pos, h)}
+                className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Test Strategy →
+              </button>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }

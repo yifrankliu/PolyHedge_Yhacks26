@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from bl_pipeline import bl_pipeline, fetch_vol_surface
-from correlation import correlate
+from correlation import correlate, align_series, logit
 from rigorous_hedge import rigorous_event_hedge
-from rigorous_hedge import rigorous_event_hedge
+from backtest import bootstrap_simulation, scenario_replay, walk_forward_oos
 
 load_dotenv()
 
@@ -1722,6 +1722,91 @@ async def hedge_rigorous(req: RigorousHedgeRequest):
         recommendations=recs,
         errors=errors,
     )
+
+
+class BacktestRequest(BaseModel):
+    market_a_id: str
+    market_b_id: str
+    direction: str = Field("YES", description="YES or NO for position side")
+    entry_price: float = Field(..., ge=0, le=1)
+    position_size: float = Field(..., gt=0)
+    hedge_direction: str = Field("YES", description="YES or NO for hedge side")
+    hedge_size: float = Field(..., gt=0)
+    n_sim: int = Field(2000, ge=100, le=5000)
+
+
+@app.post("/backtest")
+async def run_backtest(req: BacktestRequest):
+    """
+    Run full stress-test suite for a position + single hedge pair:
+    1. Bootstrap Monte Carlo path simulation (fan chart + terminal distribution + 3D density)
+    2. Historical scenario replay (spike-event scatter + CHE)
+    3. Walk-forward OOS validation (expanding window, variance reduction)
+    """
+    if req.direction not in ("YES", "NO"):
+        raise HTTPException(422, "direction must be YES or NO")
+    if req.hedge_direction not in ("YES", "NO"):
+        raise HTTPException(422, "hedge_direction must be YES or NO")
+
+    # ── Fetch histories concurrently ──────────────────────────────────────────
+    hist_a_res, hist_b_res = await asyncio.gather(
+        _fetch_clob_history(req.market_a_id),
+        _fetch_clob_history(req.market_b_id),
+        return_exceptions=True,
+    )
+    if isinstance(hist_a_res, Exception):
+        raise HTTPException(404, f"Could not fetch history for market A ({req.market_a_id}): {hist_a_res}")
+    if isinstance(hist_b_res, Exception):
+        raise HTTPException(404, f"Could not fetch history for market B ({req.market_b_id}): {hist_b_res}")
+
+    hist_a: list = hist_a_res  # type: ignore[assignment]
+    hist_b: list = hist_b_res  # type: ignore[assignment]
+
+    # ── Align and compute returns ──────────────────────────────────────────────
+    sa, sb = align_series(hist_a, hist_b)
+    if len(sa) < 15:
+        raise HTTPException(422, f"Insufficient shared history ({len(sa)} days)")
+
+    pa = sa.values.astype(float)
+    pb = sb.values.astype(float)
+    ra = np.diff(logit(pa))
+    rb = np.diff(logit(pb))
+    mask = np.isfinite(ra) & np.isfinite(rb)
+    ra, rb = ra[mask], rb[mask]
+
+    p_a0 = float(pa[-1])
+    p_b0 = float(pb[-1])
+
+    warnings: list[str] = []
+    if len(ra) < 60:
+        warnings.append(f"Short history ({len(ra)} days) — tail metrics are indicative only")
+    if p_a0 > 0.75 or p_a0 < 0.25:
+        warnings.append("Position market is near resolution — bootstrap may underestimate tail risk")
+
+    # ── Run all three methods ─────────────────────────────────────────────────
+    common = dict(
+        p_a0=p_a0, p_b0=p_b0,
+        position_size=req.position_size,
+        hedge_size=req.hedge_size,
+        direction=req.direction,
+        hedge_direction=req.hedge_direction,
+    )
+    sim   = bootstrap_simulation(ra, rb, n_sim=req.n_sim, **common)
+    scen  = scenario_replay(ra, rb, **common)
+    wf    = walk_forward_oos(ra, rb, **common)
+
+    return {
+        "simulation": sim,
+        "scenario_replay": scen,
+        "walk_forward": wf,
+        "meta": {
+            "n_shared_days": int(len(sa)),
+            "n_returns": int(len(ra)),
+            "warnings": warnings,
+            "market_a_id": req.market_a_id,
+            "market_b_id": req.market_b_id,
+        },
+    }
 
 
 @app.get("/health")

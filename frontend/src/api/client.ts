@@ -200,3 +200,70 @@ export interface HedgeResponse {
 
 export const scanHedges = (req: HedgeRequest) =>
   api.post<HedgeResponse>('/hedge', req).then((r) => r.data);
+
+// ── Backtest ───────────────────────────────────────────────────────────────────
+
+export interface BacktestRequest {
+  market_a_id: string;
+  market_b_id: string;
+  direction: 'YES' | 'NO';
+  entry_price: number;
+  position_size: number;
+  hedge_direction: 'YES' | 'NO';
+  hedge_size: number;
+  n_sim?: number;
+}
+
+export interface ScenarioItem {
+  day: number;
+  da: number;
+  db: number;
+  pos_pnl: number;
+  hedge_pnl: number;
+  net_pnl: number;
+  effectiveness: number;
+}
+
+export interface BacktestResponse {
+  simulation: {
+    n_sim: number;
+    horizon_days: number;
+    fan: Record<string, number[]>;
+    fan_unhedged: Record<string, number[]>;
+    sample_paths: number[][];
+    terminal_pnl: number[];
+    terminal_histogram: { centers: number[]; density: number[] };
+    terminal_kde: { x: number[]; y: number[] };
+    prob_loss_at_t: number[];
+    var_5pct: number;
+    expected_shortfall_5pct: number;
+    prob_profit: number;
+    density_surface: { time_steps: number[]; pnl_grid: number[]; z: number[][] };
+  };
+  scenario_replay: {
+    all_scenarios: ScenarioItem[];
+    spike_scenarios: ScenarioItem[];
+    conditional_hedge_effectiveness: number;
+    pct_events_hedged: number;
+    cvar_net: number;
+    cvar_unhedged: number;
+  };
+  walk_forward: {
+    hedged_cum: number[];
+    unhedged_cum: number[];
+    rolling_beta: number[];
+    oos_variance_reduction: number;
+    n_oos_points: number;
+    error?: string;
+  };
+  meta: {
+    n_shared_days: number;
+    n_returns: number;
+    warnings: string[];
+    market_a_id: string;
+    market_b_id: string;
+  };
+}
+
+export const runBacktest = (req: BacktestRequest) =>
+  api.post<BacktestResponse>('/backtest', req).then((r) => r.data);
