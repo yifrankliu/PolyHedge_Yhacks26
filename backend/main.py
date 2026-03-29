@@ -15,6 +15,7 @@ from hedge import (
     compute_hedge_ratio,
     composite_hedge_score,
 )
+from rigorous_hedge import rigorous_event_hedge
 
 load_dotenv()
 
@@ -207,6 +208,45 @@ class HedgeResponse(BaseModel):
     errors: dict
 
 
+class RigorousHedgeRequest(BaseModel):
+    market_id: str
+    direction: str = Field("YES", description="YES or NO for position side")
+    position_size: float = Field(..., gt=0)
+    # Placeholder until team candidate-search module is merged:
+    candidate_market_ids: list[str] = Field(default_factory=list)
+    search_query: Optional[str] = None
+    max_candidates: int = Field(8, ge=1, le=30)
+    top_k: int = Field(5, ge=1, le=20)
+    spike_quantile: float = Field(0.9, ge=0.5, le=0.99)
+    max_events: int = Field(100, ge=10, le=500)
+
+
+class RigorousHedgeRecommendation(BaseModel):
+    candidate_market_id: str
+    question: str
+    hedge_direction: str
+    hedge_ratio: float
+    recommended_size: float
+    correlation: float
+    event_beta_b_on_a: float
+    event_beta_ci_low: Optional[float]
+    event_beta_ci_high: Optional[float]
+    event_mean_ratio: float
+    event_mad_ratio: float
+    n_events: int
+    n_shared_days: int
+    risk_reduction_estimate: float
+    confidence: float
+    notes: list[str]
+
+
+class RigorousHedgeResponse(BaseModel):
+    position_market_id: str
+    candidate_source: str
+    recommendations: list[RigorousHedgeRecommendation]
+    errors: dict
+
+
 # ── Shared CLOB helper ─────────────────────────────────────────────────────────
 
 async def _fetch_clob_history(condition_id: str) -> list:
@@ -227,6 +267,64 @@ async def _fetch_clob_history(condition_id: str) -> list:
     if hist_resp.status_code != 200:
         raise HTTPException(502, f"CLOB history failed for {condition_id}: {hist_resp.status_code}")
     return hist_resp.json().get("history", [])
+
+
+async def _placeholder_candidate_markets(
+    base_market_id: str,
+    *,
+    search_query: Optional[str],
+    max_candidates: int,
+) -> list[dict]:
+    """
+    Temporary candidate sourcing until dedicated correlation-search module is merged.
+    Returns [{id, question}].
+    """
+    candidates: list[dict] = []
+    seen = {base_market_id}
+
+    if search_query:
+        searched = await search_polymarket(search_query)
+        for market in searched:
+            market_id = str(market.get("id"))
+            if not market_id or market_id in seen:
+                continue
+            seen.add(market_id)
+            candidates.append({
+                "id": market_id,
+                "question": market.get("question") or market_id,
+            })
+            if len(candidates) >= max_candidates:
+                return candidates
+
+    # Fallback: top volume open markets if query returned nothing.
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={
+                "closed": False,
+                "active": True,
+                "order": "volumeNum",
+                "ascending": False,
+                "limit": max_candidates + 5,
+            },
+        )
+    if resp.status_code != 200:
+        return candidates
+
+    raw = resp.json()
+    page = raw if isinstance(raw, list) else raw.get("markets", [])
+    for market in page:
+        market_id = str(market.get("id"))
+        if not market_id or market_id in seen:
+            continue
+        seen.add(market_id)
+        candidates.append({
+            "id": market_id,
+            "question": market.get("question") or market_id,
+        })
+        if len(candidates) >= max_candidates:
+            break
+    return candidates
 
 
 # ── Market search endpoints ────────────────────────────────────────────────────
@@ -705,6 +803,122 @@ async def hedge_scanner(req: HedgeRequest):
         position_market_id=req.market_id,
         recommendations=recommendations,
         bl_signal=bl_signal_out,
+        errors=errors,
+    )
+
+
+@app.post("/hedge-rigorous", response_model=RigorousHedgeResponse)
+async def hedge_rigorous(req: RigorousHedgeRequest):
+    """
+    Event-study + robust-regression hedge estimator.
+    Candidate discovery is placeholder-compatible:
+      1) use req.candidate_market_ids if provided
+      2) otherwise use search_query + fallback volume markets
+    """
+    if req.direction not in ("YES", "NO"):
+        raise HTTPException(422, "direction must be YES or NO")
+
+    errors: dict = {}
+    candidate_source = "provided_ids" if req.candidate_market_ids else "placeholder_search"
+
+    try:
+        base_history = await _fetch_clob_history(req.market_id)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch base market history: {e}")
+
+    candidates: list[dict] = []
+    if req.candidate_market_ids:
+        seen = {req.market_id}
+        for market_id in req.candidate_market_ids:
+            mid = str(market_id)
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            candidates.append({"id": mid, "question": mid})
+            if len(candidates) >= req.max_candidates:
+                break
+    else:
+        candidates = await _placeholder_candidate_markets(
+            req.market_id,
+            search_query=req.search_query,
+            max_candidates=req.max_candidates,
+        )
+
+    if not candidates:
+        return RigorousHedgeResponse(
+            position_market_id=req.market_id,
+            candidate_source=candidate_source,
+            recommendations=[],
+            errors={"candidates": "No candidate markets found (placeholder search returned empty)."},
+        )
+
+    hist_results = await asyncio.gather(
+        *[_fetch_clob_history(candidate["id"]) for candidate in candidates],
+        return_exceptions=True,
+    )
+
+    recs: list[RigorousHedgeRecommendation] = []
+    position_sign = 1 if req.direction == "YES" else -1
+
+    for candidate, hist in zip(candidates, hist_results):
+        candidate_id = candidate["id"]
+        if isinstance(hist, Exception):
+            errors[candidate_id] = f"history_fetch_failed: {hist}"
+            continue
+
+        corr = correlate(req.market_id, candidate_id, base_history, hist)
+        if corr is None or corr.get("error"):
+            errors[candidate_id] = f"correlation_failed: {corr.get('error') if corr else 'unknown'}"
+            continue
+
+        robust = rigorous_event_hedge(
+            base_history,
+            hist,
+            spike_quantile=req.spike_quantile,
+            max_events=req.max_events,
+        )
+        if robust.get("error"):
+            errors[candidate_id] = f"rigorous_model_failed: {robust['error']}"
+            continue
+
+        hedge_ratio = float(robust["hedge_ratio"])
+        hedge_direction = "NO" if hedge_ratio * position_sign < 0 else "YES"
+        recommended_size = abs(hedge_ratio) * req.position_size
+
+        notes = list(robust.get("notes", []))
+        if corr.get("break_detected"):
+            notes.append("Correlation break detected")
+        if corr.get("rolling_std", 0) > 0.3:
+            notes.append("Rolling correlation unstable")
+
+        recs.append(
+            RigorousHedgeRecommendation(
+                candidate_market_id=candidate_id,
+                question=candidate.get("question") or candidate_id,
+                hedge_direction=hedge_direction,
+                hedge_ratio=round(abs(hedge_ratio), 6),
+                recommended_size=round(recommended_size, 2),
+                correlation=round(float(corr.get("full_pearson_returns", 0.0)), 6),
+                event_beta_b_on_a=float(robust["event_beta_b_on_a"]),
+                event_beta_ci_low=robust.get("event_beta_ci_low"),
+                event_beta_ci_high=robust.get("event_beta_ci_high"),
+                event_mean_ratio=float(robust["event_mean_ratio"]),
+                event_mad_ratio=float(robust["event_mad_ratio"]),
+                n_events=int(robust["n_events"]),
+                n_shared_days=int(robust["n_shared_days"]),
+                risk_reduction_estimate=float(robust["risk_reduction_estimate"]),
+                confidence=float(robust["confidence"]),
+                notes=notes,
+            )
+        )
+
+    recs.sort(key=lambda r: (r.confidence, abs(r.correlation), r.risk_reduction_estimate), reverse=True)
+    recs = recs[: req.top_k]
+
+    return RigorousHedgeResponse(
+        position_market_id=req.market_id,
+        candidate_source=candidate_source,
+        recommendations=recs,
         errors=errors,
     )
 
