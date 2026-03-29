@@ -1,17 +1,17 @@
 import { useState } from 'react';
-import WhatIfAnalyzer from './components/WhatIfAnalyzer';
 import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
 import CorrelationScanner from './components/CorrelationScanner';
 import { Market } from './api/client';
+import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInputPage';
+import HedgeScanner from './components/HedgeScanner';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
-  { id: 'whatif', label: 'What-If Analyzer' },
+  { id: 'portfolio', label: 'Position Input' },
   { id: 'bl', label: 'Prob Comparison' },
   { id: 'compare', label: 'Market Comparator' },
   { id: 'scanner', label: 'Correlation Scanner' },
-  { id: 'portfolio', label: 'Portfolio', disabled: true },
-  { id: 'hedge', label: 'Hedge Scanner', disabled: true },
+  { id: 'hedge', label: 'Hedge Scanner' },
 ];
 
 
@@ -24,6 +24,12 @@ export default function App() {
     setPendingMarketA(target);
     setPendingMarketB(correlated);
     setActiveTab('compare');
+  const [activeTab, setActiveTab] = useState('portfolio');
+  const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
+
+  const handleScanHedges = (positions: PortfolioPosition[]) => {
+    setHedgePositions(positions);
+    setActiveTab('hedge');
   };
 
   return (
@@ -75,7 +81,7 @@ export default function App() {
 
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {activeTab === 'whatif' && <WhatIfAnalyzer />}
+        {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
         {activeTab === 'bl' && <BLComparison />}
         {activeTab === 'compare' && (
           <MarketCompare
@@ -87,6 +93,7 @@ export default function App() {
         <div style={{ display: activeTab === 'scanner' ? 'block' : 'none' }}>
           <CorrelationScanner onCompare={handleCompare} />
         </div>
+        {activeTab === 'hedge' && <HedgeScanner initialPositions={hedgePositions} />}
       </main>
     </div>
   );

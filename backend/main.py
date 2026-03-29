@@ -3,6 +3,8 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+import re
+from typing import Optional
 import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
@@ -11,15 +13,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-from kelly import (
-    compute_payoff_curve,
-    kelly_fraction,
-    annualized_return,
-    max_profit,
-    breakeven_probability,
-)
 from bl_pipeline import bl_pipeline, fetch_vol_surface
 from correlation import correlate
+from hedge import (
+    bl_confidence as compute_bl_confidence,
+    compute_hedge_ratio,
+    composite_hedge_score,
+)
 
 load_dotenv()
 
@@ -445,49 +445,193 @@ def _merge_search_results(
     return merged[:25]
 
 
-# ── Request / Response models ──────────────────────────────────────────────────
-
-class WhatIfRequest(BaseModel):
-    market_price: float = Field(..., gt=0, lt=1, description="Entry price 0–1")
-    user_probability: float = Field(..., ge=0, le=1, description="Your prob estimate 0–1")
-    position_size: float = Field(..., gt=0, description="Dollars to risk")
-    days_to_resolution: int = Field(..., gt=0, description="Days until market resolves")
-
-
-class WhatIfResponse(BaseModel):
-    payoff_curve: list
-    kelly_fraction: float
-    half_kelly: float
-    annualized_return: float
-    max_profit: float
-    max_loss: float
-    breakeven_probability: float
-    expected_value: float
-    edge: float  # user_prob - market_price
+def _to_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-# ── Feature 1: What-If Analyzer ───────────────────────────────────────────────
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
-@app.post("/whatif", response_model=WhatIfResponse)
-async def whatif(req: WhatIfRequest):
-    kf = kelly_fraction(req.user_probability, req.market_price)
-    ar = annualized_return(req.market_price, req.days_to_resolution)
-    mp = max_profit(req.market_price, req.position_size)
-    bp = breakeven_probability(req.market_price)
-    contracts = req.position_size / req.market_price
-    ev = contracts * (req.user_probability * (1 - req.market_price) - (1 - req.user_probability) * req.market_price)
 
-    return WhatIfResponse(
-        payoff_curve=compute_payoff_curve(req.market_price, req.position_size),
-        kelly_fraction=round(kf, 4),
-        half_kelly=round(kf / 2, 4),
-        annualized_return=round(ar, 2),
-        max_profit=round(mp, 2),
-        max_loss=round(req.position_size, 2),
-        breakeven_probability=round(bp, 2),
-        expected_value=round(ev, 2),
-        edge=round(req.user_probability - req.market_price, 4),
-    )
+def _matches_query(text: str, query: str) -> bool:
+    query_norm = _normalize_text(query)
+    text_norm = _normalize_text(text)
+    if not query_norm:
+        return True
+    if not text_norm:
+        return False
+
+    text_tokens = text_norm.split()
+    token_set = set(text_tokens)
+    for token in query_norm.split():
+        if len(token) <= 3:
+            if token not in token_set:
+                return False
+        else:
+            if token in token_set:
+                continue
+            if not any(t.startswith(token) for t in text_tokens):
+                return False
+    return True
+
+
+def _polymarket_yes_price(market: dict):
+    # Gamma payloads are inconsistent across market versions; try several fields.
+    direct = _to_float(market.get("lastTradePrice"))
+    if direct is not None:
+        return direct
+
+    outcomes_raw = market.get("outcomes")
+    prices_raw = market.get("outcomePrices")
+    if not outcomes_raw or not prices_raw:
+        return None
+
+    outcomes = outcomes_raw
+    prices = prices_raw
+    if isinstance(outcomes, str):
+        try:
+            import json
+            outcomes = json.loads(outcomes)
+        except Exception:
+            outcomes = []
+    if isinstance(prices, str):
+        try:
+            import json
+            prices = json.loads(prices)
+        except Exception:
+            prices = []
+
+    if not isinstance(outcomes, list) or not isinstance(prices, list):
+        return None
+
+    yes_idx = None
+    for i, outcome in enumerate(outcomes):
+        if isinstance(outcome, str) and outcome.strip().lower() == "yes":
+            yes_idx = i
+            break
+    if yes_idx is None or yes_idx >= len(prices):
+        return None
+    return _to_float(prices[yes_idx])
+
+
+def _normalize_polymarket_market(market: dict):
+    return {
+        "id": str(market.get("id")),
+        "question": market.get("question"),
+        "price": _polymarket_yes_price(market),
+        "volume": _to_float(market.get("volume")),
+        "end_date": market.get("endDate"),
+        "source": "polymarket",
+    }
+
+
+def _kalshi_probability(market: dict):
+    # New Kalshi payloads frequently use *_dollars string fields.
+    last_cents = _to_float(market.get("last_price"))
+    if last_cents is not None:
+        return last_cents / 100.0
+
+    last_dollars = _to_float(market.get("last_price_dollars"))
+    if last_dollars is not None:
+        return last_dollars
+
+    yes_bid = _to_float(market.get("yes_bid_dollars"))
+    yes_ask = _to_float(market.get("yes_ask_dollars"))
+    if yes_bid is not None and yes_ask is not None:
+        return (yes_bid + yes_ask) / 2.0
+    return yes_bid if yes_bid is not None else yes_ask
+
+
+def _normalize_kalshi_market(market: dict):
+    return {
+        "id": market.get("ticker"),
+        "question": market.get("title") or market.get("yes_sub_title") or market.get("subtitle"),
+        "price": _kalshi_probability(market),
+        "volume": _to_float(market.get("volume_dollars") or market.get("volume")),
+        "end_date": market.get("close_time") or market.get("expiration_time"),
+        "source": "kalshi",
+    }
+
+
+# ── Hedge models ──────────────────────────────────────────────────────────────
+
+class HedgeRequest(BaseModel):
+    market_id: str
+    direction: str = Field(..., description="YES or NO")
+    entry_price: float = Field(..., gt=0, lt=1)
+    current_price: float = Field(..., ge=0, le=1)
+    position_size: float = Field(..., gt=0)
+    search_query: str = Field(..., min_length=1)
+    asset: Optional[str] = None        # "BTC" or "ETH" — enables BL signal
+    threshold: Optional[float] = None  # price threshold in USD
+    expiry: Optional[str] = None       # YYYY-MM-DD
+
+
+class HedgeRecommendation(BaseModel):
+    candidate_market_id: str
+    question: str
+    current_price: float
+    platform: str
+    hedge_direction: str
+    hedge_ratio: float
+    recommended_size: float
+    correlation: float
+    full_pearson: float
+    rolling_std: float
+    lead_direction: str
+    shared_history_days: float
+    n_observations: int
+    composite_score: float
+    bl_divergence: Optional[float]
+    bl_confidence: Optional[float]
+    hedge_confidence: float
+    confidence_label: str
+    caveats: list
+    stability_discounted: bool
+
+
+class BLSignalOut(BaseModel):
+    bl_prob: float
+    bl_divergence: float
+    bl_confidence: float
+    bl_direction: str
+    spot: Optional[float]
+    strikes_used: int
+    strike_range: list
+
+
+class HedgeResponse(BaseModel):
+    position_market_id: str
+    recommendations: list
+    bl_signal: Optional[BLSignalOut]
+    errors: dict
+
+
+# ── Shared CLOB helper ─────────────────────────────────────────────────────────
+
+async def _fetch_clob_history(condition_id: str) -> list:
+    async with httpx.AsyncClient(timeout=10) as client:
+        clob_resp = await client.get(f"https://clob.polymarket.com/markets/{condition_id}")
+    if clob_resp.status_code != 200:
+        raise HTTPException(502, f"CLOB lookup failed for {condition_id}: {clob_resp.status_code}")
+    tokens = clob_resp.json().get("tokens") or []
+    yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), tokens[0] if tokens else None)
+    if not yes_token:
+        raise HTTPException(404, f"No YES token for {condition_id}")
+    token_id = yes_token["token_id"]
+    async with httpx.AsyncClient(timeout=15) as client:
+        hist_resp = await client.get(
+            "https://clob.polymarket.com/prices-history",
+            params={"market": token_id, "interval": "max", "fidelity": 1440},
+        )
+    if hist_resp.status_code != 200:
+        raise HTTPException(502, f"CLOB history failed for {condition_id}: {hist_resp.status_code}")
+    return hist_resp.json().get("history", [])
 
 
 # ── Market search endpoints ────────────────────────────────────────────────────
@@ -500,97 +644,128 @@ def _oddpool_headers() -> dict:
 
 @app.get("/markets/polymarket")
 async def search_polymarket(search: str = Query(..., min_length=1)):
-    headers = _oddpool_headers()
+    query = search.strip()
+    seen = set()
+    matches = []
 
-    # Search events (titles) — broader match than searching market questions directly
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{ODDPOOL_BASE}/search/events",
-            params={"q": search, "limit": 20},
-            headers=headers,
-        )
-    if resp.status_code == 429:
-        raise HTTPException(429, "Rate limit — wait a moment and try again")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
-
-    events = resp.json() if isinstance(resp.json(), list) else []
-    poly_events = [e for e in events if e.get("exchange") == "polymarket"][:5]
-
-    seen: set[str] = set()
-    results = []
-
-    for event in poly_events:
-        await asyncio.sleep(1.1)  # Oddpool burst limit: 1 req/sec
-        event_id = event.get("event_id")
-        async with httpx.AsyncClient(timeout=10) as client:
-            mresp = await client.get(
-                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
-                headers=headers,
+        # Gamma "search" query is currently unreliable; fetch liquid open markets then filter ourselves.
+        page_size = 200
+        for offset in range(0, 1000, page_size):
+            resp = await client.get(
+                f"{POLYMARKET_GAMMA}/markets",
+                params={
+                    "closed": False,
+                    "active": True,
+                    "order": "volumeNum",
+                    "ascending": False,
+                    "limit": page_size,
+                    "offset": offset,
+                },
             )
-        if mresp.status_code != 200:
-            continue
-        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
-            mid = m.get("market_id")
-            if mid and mid not in seen:
-                seen.add(mid)
-                results.append({
-                    "id": mid,
-                    "question": m.get("question"),
-                    "price": float(m.get("last_yes_price") or 0),
-                    "volume": m.get("volume"),
-                    "end_date": None,
-                    "source": "polymarket",
-                })
+            if resp.status_code != 200:
+                raise HTTPException(502, f"Polymarket error: {resp.status_code}")
 
-    return results
+            page = resp.json()
+            if not isinstance(page, list) or not page:
+                break
+
+            for m in page:
+                market_id = str(m.get("id"))
+                if not market_id or market_id in seen:
+                    continue
+                seen.add(market_id)
+                text = " ".join(
+                    str(m.get(k, "") or "")
+                    for k in ("question", "slug", "description")
+                )
+                if _matches_query(text, query):
+                    matches.append(_normalize_polymarket_market(m))
+                    if len(matches) >= 10:
+                        return matches
+
+            if len(page) < page_size:
+                break
+
+    return matches
+
+
+@app.get("/markets/polymarket/{market_id}")
+async def get_polymarket_market(market_id: str):
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{POLYMARKET_GAMMA}/markets/{market_id}")
+    if resp.status_code == 404:
+        raise HTTPException(404, "Polymarket market not found")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Polymarket error: {resp.status_code}")
+
+    m = resp.json()
+    return _normalize_polymarket_market(m)
 
 
 @app.get("/markets/kalshi")
 async def search_kalshi(search: str = Query(..., min_length=1)):
-    headers = _oddpool_headers()
+    query = search.strip()
+    headers = {}
+    if KALSHI_API_KEY:
+        headers["Authorization"] = f"Token {KALSHI_API_KEY}"
 
+    all_markets = []
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{ODDPOOL_BASE}/search/events",
-            params={"q": search, "limit": 20},
+            f"{KALSHI_BASE}/markets",
+            params={"limit": 200, "status": "open"},
             headers=headers,
         )
     if resp.status_code == 429:
         raise HTTPException(429, "Rate limit — wait a moment and try again")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
+        raise HTTPException(502, f"Kalshi error: {resp.status_code}")
+    data = resp.json()
+    all_markets.extend(data.get("markets", []))
 
-    events = resp.json() if isinstance(resp.json(), list) else []
-    kalshi_events = [e for e in events if e.get("exchange") == "kalshi"][:5]
+    # Fallback: some API versions honor search server-side better, so merge those too.
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp_search = await client.get(
+            f"{KALSHI_BASE}/markets",
+            params={"search": search, "limit": 200, "status": "open"},
+            headers=headers,
+        )
+    if resp_search.status_code == 200:
+        all_markets.extend(resp_search.json().get("markets", []))
 
-    seen: set[str] = set()
+    seen = set()
     results = []
-
-    for event in kalshi_events:
-        await asyncio.sleep(1.1)
-        event_id = event.get("event_id")
-        async with httpx.AsyncClient(timeout=10) as client:
-            mresp = await client.get(
-                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
-                headers=headers,
-            )
-        if mresp.status_code != 200:
+    for m in all_markets:
+        market_id = m.get("ticker")
+        if not market_id or market_id in seen:
             continue
-        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
-            mid = m.get("market_id")
-            if mid and mid not in seen:
-                seen.add(mid)
-                results.append({
-                    "id": mid,
-                    "question": m.get("question"),
-                    "price": float(m.get("last_yes_price") or 0),
-                    "volume": m.get("volume"),
-                    "end_date": None,
-                    "source": "kalshi",
-                })
-
+        seen.add(market_id)
+        text = " ".join(
+            str(m.get(k, "") or "")
+            for k in ("title", "yes_sub_title", "no_sub_title", "subtitle")
+        )
+        if _matches_query(text, query):
+            results.append(_normalize_kalshi_market(m))
+            if len(results) >= 10:
+                break
     return results
+
+
+@app.get("/markets/kalshi/{ticker}")
+async def get_kalshi_market(ticker: str):
+    headers = {}
+    if KALSHI_API_KEY:
+        headers["Authorization"] = f"Token {KALSHI_API_KEY}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{KALSHI_BASE}/markets/{ticker}", headers=headers)
+    if resp.status_code == 404:
+        raise HTTPException(404, "Kalshi market not found")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Kalshi error: {resp.status_code}")
+
+    m = resp.json().get("market", {})
+    return _normalize_kalshi_market(m)
 
 
 @app.get("/bl-comparison")
@@ -1005,6 +1180,171 @@ async def correlate_scan_stream(market_id: str = Query(...)):
         event_gen(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+@app.post("/hedge", response_model=HedgeResponse)
+async def hedge_scanner(req: HedgeRequest):
+    """
+    Given one prediction market position, find and rank hedge candidates.
+    Searches Oddpool for correlated markets, computes minimum-variance hedge
+    ratios, and optionally incorporates the BL options signal for crypto positions.
+    """
+    if req.direction not in ("YES", "NO"):
+        raise HTTPException(422, "direction must be YES or NO")
+    if not ODDPOOL_API_KEY:
+        raise HTTPException(503, "ODDPOOL_API_KEY not configured")
+    headers = {"X-API-Key": ODDPOOL_API_KEY}
+    errors: dict = {}
+
+    # ── Step 1: Fetch user's position market history ───────────────────────────
+    try:
+        user_history = await _fetch_clob_history(req.market_id)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch position market history: {e}")
+
+    # ── Step 2: Run BL signal (crypto only) ───────────────────────────────────
+    bl_div: Optional[float] = None
+    bl_conf: Optional[float] = None
+    bl_signal_out: Optional[BLSignalOut] = None
+
+    if req.asset and req.threshold and req.expiry:
+        try:
+            bl_result = await bl_pipeline(req.asset, req.threshold, req.expiry)
+            bl_div = bl_result["prob"] - req.current_price
+            T_days = bl_result["T_years"] * 365
+            bl_conf = compute_bl_confidence(bl_result, req.threshold, T_days, bl_div)
+            bl_signal_out = BLSignalOut(
+                bl_prob=bl_result["prob"],
+                bl_divergence=round(bl_div, 4),
+                bl_confidence=bl_conf,
+                bl_direction="pm_underpriced" if bl_div > 0 else "pm_overpriced",
+                spot=bl_result.get("spot"),
+                strikes_used=bl_result.get("strikes_used", 0),
+                strike_range=bl_result.get("strike_range", []),
+            )
+        except Exception as e:
+            errors["bl"] = str(e)
+
+    # ── Step 3: Search Oddpool for candidate markets ───────────────────────────
+    candidates: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            search_resp = await client.get(
+                f"{ODDPOOL_BASE}/search/events",
+                params={"q": req.search_query, "limit": 20},
+                headers=headers,
+            )
+        if search_resp.status_code == 200:
+            events = search_resp.json() if isinstance(search_resp.json(), list) else []
+            poly_events = [e for e in events if e.get("exchange") == "polymarket"][:4]
+            seen: set[str] = set()
+            for event in poly_events:
+                await asyncio.sleep(1.1)
+                event_id = event.get("event_id")
+                async with httpx.AsyncClient(timeout=10) as client:
+                    mresp = await client.get(
+                        f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
+                        headers=headers,
+                    )
+                if mresp.status_code != 200:
+                    continue
+                for m in (mresp.json() if isinstance(mresp.json(), list) else []):
+                    mid = m.get("market_id")
+                    if mid and mid != req.market_id and mid not in seen:
+                        seen.add(mid)
+                        candidates.append({
+                            "id": mid,
+                            "question": m.get("question", ""),
+                            "price": float(m.get("last_yes_price") or 0),
+                        })
+                if len(candidates) >= 8:
+                    break
+        else:
+            errors["search"] = f"Oddpool search error: {search_resp.status_code}"
+    except Exception as e:
+        errors["search"] = str(e)
+
+    if not candidates:
+        return HedgeResponse(
+            position_market_id=req.market_id,
+            recommendations=[],
+            bl_signal=bl_signal_out,
+            errors={**errors, "candidates": "No candidates found — try a different search query"},
+        )
+
+    # ── Step 4: Fetch all candidate histories concurrently ─────────────────────
+    hist_results = await asyncio.gather(
+        *[_fetch_clob_history(c["id"]) for c in candidates],
+        return_exceptions=True,
+    )
+
+    # ── Step 5: Correlate each candidate and compute hedge stats ───────────────
+    recommendations: list[HedgeRecommendation] = []
+
+    for candidate, hist in zip(candidates, hist_results):
+        if isinstance(hist, Exception):
+            continue
+        corr = correlate(req.market_id, candidate["id"], user_history, hist)
+        if corr is None or corr.get("error"):
+            continue
+
+        sigma_a = corr.get("sigma_logit_returns_a", 0.0)
+        sigma_b = corr.get("sigma_logit_returns_b", 0.0)
+
+        hedge_info = compute_hedge_ratio(
+            full_pearson_returns=corr["full_pearson_returns"],
+            sigma_a=sigma_a,
+            sigma_b=sigma_b,
+            rolling_std=corr["rolling_std"],
+            break_detected=corr["break_detected"],
+            position_size=req.position_size,
+            direction=req.direction,
+            bl_divergence=bl_div,
+            bl_conf=bl_conf,
+        )
+
+        hedge_score, confidence_label, caveats = composite_hedge_score(
+            corr_composite=corr["composite_score"],
+            shared_history_days=corr["shared_history_days"],
+            bl_confidence_score=bl_conf,
+            bl_divergence=bl_div,
+        )
+
+        if corr["break_detected"]:
+            caveats.append("Regime break detected — correlation may have shifted")
+        if corr["rolling_std"] > 0.3:
+            caveats.append("Unstable rolling correlation — stability discount applied")
+        if bl_signal_out and bl_signal_out.bl_direction == "pm_overpriced":
+            caveats.append("Polymarket > Deribit — may reflect one-touch vs European structure")
+
+        recommendations.append(HedgeRecommendation(
+            candidate_market_id=candidate["id"],
+            question=candidate["question"],
+            current_price=candidate["price"],
+            platform="polymarket",
+            hedge_direction=hedge_info["hedge_direction"],
+            hedge_ratio=hedge_info["hedge_ratio"],
+            recommended_size=hedge_info["recommended_size"],
+            correlation=corr["full_pearson_returns"],
+            full_pearson=corr["full_pearson"],
+            rolling_std=corr["rolling_std"],
+            lead_direction=corr["lead_direction"],
+            shared_history_days=corr["shared_history_days"],
+            n_observations=corr["n_observations"],
+            composite_score=corr["composite_score"],
+            bl_divergence=round(bl_div, 4) if bl_div is not None else None,
+            bl_confidence=bl_conf,
+            hedge_confidence=hedge_score,
+            confidence_label=confidence_label,
+            caveats=caveats,
+            stability_discounted=hedge_info.get("stability_discounted", False),
+        ))
+
+    recommendations.sort(key=lambda x: -x.hedge_confidence)
+
+    return HedgeResponse(
+        position_market_id=req.market_id,
+        recommendations=recommendations,
+        bl_signal=bl_signal_out,
+        errors=errors,
     )
 
 
