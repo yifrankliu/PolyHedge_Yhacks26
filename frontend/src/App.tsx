@@ -104,6 +104,7 @@ export default function App() {
           <HedgeScanner
             initialPositions={hedgePositions}
             onRecommendationsUpdate={handleRecommendationsUpdate}
+            onNavigateToStrategy={() => setActiveTab('strategy')}
           />
         </div>
         <div style={{ display: activeTab === 'strategy' ? 'block' : 'none' }}>

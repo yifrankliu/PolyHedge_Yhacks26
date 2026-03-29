@@ -254,9 +254,11 @@ const DEFAULT_TOP_N = 75;
 export default function HedgeScanner({
   initialPositions = [],
   onRecommendationsUpdate,
+  onNavigateToStrategy,
 }: {
   initialPositions?: PortfolioPosition[];
   onRecommendationsUpdate?: (recs: HedgeRecommendation[], pos: PortfolioPosition) => void;
+  onNavigateToStrategy?: () => void;
 }) {
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
@@ -441,6 +443,14 @@ export default function HedgeScanner({
                     style={{ width: `${total > 0 ? Math.round((scanned / total) * 100) : 0}%` }}
                   />
                 </div>
+                {done && recommendations.length > 0 && (
+                  <button
+                    onClick={onNavigateToStrategy}
+                    className="mt-3 w-full bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Build Strategy →
+                  </button>
+                )}
               </div>
             )}
 
