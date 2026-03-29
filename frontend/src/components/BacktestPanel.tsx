@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
-const Plot = lazy(() => import('react-plotly.js'));
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as ReTooltip, ResponsiveContainer, ReferenceLine,
@@ -8,6 +7,7 @@ import {
 import { runBacktest, BacktestResponse, ScenarioItem } from '../api/client';
 
 // ── Plotly lazy-loaded on demand (3.5 MB) ────────────────────────────────────
+const Plot = lazy(() => import('react-plotly.js'));
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Props {
@@ -444,7 +444,7 @@ export default function BacktestPanel({
             />
             <YAxis tick={false} axisLine={false} tickLine={false} width={0} />
             <ReTooltip
-              formatter={(v: any, name: string | undefined) => [(v as number).toFixed(4), name ?? '']}
+              formatter={(v: any, name: any) => [(v as number).toFixed(4), name ?? '']}
               contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
             />
             <ReferenceLine x={0} stroke={ZINC_600} strokeDasharray="4 2" />
@@ -572,7 +572,7 @@ export default function BacktestPanel({
                   />
                   <ReTooltip
                     contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
-                    formatter={(v: any, name: string | undefined) => [(v as number).toFixed(3), name ?? '']}
+                    formatter={(v: any, name: any) => [(v as number).toFixed(3), name ?? '']}
                   />
                   <ReferenceLine y={0} stroke={ZINC_600} strokeDasharray="4 2" />
                   <Line type="monotone" dataKey="hedged" stroke={IND_MED} strokeWidth={2} dot={false} name="Hedged" isAnimationActive={false} />
