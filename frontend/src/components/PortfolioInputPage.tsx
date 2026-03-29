@@ -328,7 +328,7 @@ export default function PortfolioInputPage({ onScanHedges, demoMode }: { onScanH
           <span className="text-amber-400 text-sm mt-0.5 flex-shrink-0">★</span>
           <div>
             <p className="text-amber-300 text-xs font-medium">Demo Mode — pre-loaded position</p>
-            <p className="text-amber-600 text-xs mt-0.5">BTC $100k YES @ 65¢ / $500 stake. Click <span className="text-amber-400">Scan for Hedges →</span> to continue the pipeline.</p>
+            <p className="text-amber-600 text-xs mt-0.5">Iranian regime fall YES @ 18¢ / $500 stake. Click <span className="text-amber-400">Scan for Hedges →</span> to continue the pipeline.</p>
           </div>
         </div>
       )}
