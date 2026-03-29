@@ -71,15 +71,15 @@ function MarketLookup({
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-      <p className="text-sm font-semibold text-gray-200">{title}</p>
-      <p className="text-xs text-gray-500 mt-1 mb-3">{hint}</p>
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+      <p className="text-sm font-semibold text-zinc-200">{title}</p>
+      <p className="text-xs text-zinc-500 mt-1 mb-3">{hint}</p>
 
       <div className="flex gap-2">
         <select
           value={source}
           onChange={(e) => setSource(e.target.value as Source)}
-          className="bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600"
+          className="bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
         >
           <option value="polymarket">Polymarket</option>
           <option value="kalshi">Kalshi</option>
@@ -89,12 +89,12 @@ function MarketLookup({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && runSearch()}
           placeholder="Search market by keyword..."
-          className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+          className="flex-1 bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
         />
         <button
           onClick={runSearch}
           disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
         >
           {loading ? '...' : 'Search'}
         </button>
@@ -103,7 +103,7 @@ function MarketLookup({
       {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
 
       {results.length > 0 && (
-        <div className="mt-3 bg-gray-800 rounded-lg border border-gray-700 max-h-56 overflow-y-auto">
+        <div className="mt-3 bg-zinc-800 rounded-lg border border-zinc-700 max-h-56 overflow-y-auto">
           {results.map((market) => (
             <button
               key={market.id}
@@ -112,10 +112,10 @@ function MarketLookup({
                 setResults([]);
                 setQuery(market.question);
               }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
+              className="w-full text-left px-4 py-3 hover:bg-zinc-700 border-b border-zinc-700 last:border-0 transition-colors"
             >
               <p className="text-sm text-white truncate">{market.question}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className="text-xs text-zinc-400 mt-0.5">
                 {market.price != null ? `${(market.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
                 {market.end_date ? new Date(market.end_date).toLocaleDateString() : 'no date'}
               </p>
@@ -313,18 +313,18 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
     <div className="max-w-6xl mx-auto space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-white">Portfolio Input Workbench</h2>
-        <p className="text-sm text-gray-400 mt-1">
+        <p className="text-sm text-zinc-400 mt-1">
           Add the exact markets and positions you hold or are considering.
         </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
         <div className="xl:col-span-3 space-y-5">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-4">
-            <p className="text-sm font-semibold text-gray-200">1. Add Position</p>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">1. Add Position</p>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Market Input Method</label>
+              <label className="block text-xs text-zinc-400 mb-1">Market Input Method</label>
               <select
                 value={positionInputMode}
                 onChange={(e) => {
@@ -333,7 +333,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                   setManualError('');
                   setFormError('');
                 }}
-                className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
               >
                 <option value="search">Search by keyword</option>
                 <option value="manual_id">Enter exact market ID/ticker</option>
@@ -347,21 +347,21 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                 onSelect={(market, source) => applySelectedMarket(market, source)}
               />
             ) : (
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-3">
+              <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Source</label>
+                    <label className="block text-xs text-zinc-400 mb-1">Source</label>
                     <select
                       value={manualSource}
                       onChange={(e) => setManualSource(e.target.value as Source)}
-                      className="w-full bg-gray-900 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                      className="w-full bg-zinc-900 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
                     >
                       <option value="polymarket">Polymarket</option>
                       <option value="kalshi">Kalshi</option>
                     </select>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-gray-400 mb-1">
+                    <label className="block text-xs text-zinc-400 mb-1">
                       {manualSource === 'polymarket' ? 'Polymarket Market ID' : 'Kalshi Ticker'}
                     </label>
                     <div className="flex gap-2">
@@ -369,12 +369,12 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                         value={manualMarketId}
                         onChange={(e) => setManualMarketId(e.target.value)}
                         placeholder={manualSource === 'polymarket' ? 'e.g. 12345' : 'e.g. KXBTC-30APR26-B90000'}
-                        className="flex-1 bg-gray-900 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                        className="flex-1 bg-zinc-900 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
                       />
                       <button
                         onClick={lookupManualMarket}
                         disabled={manualLoading}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
                       >
                         {manualLoading ? '...' : 'Load'}
                       </button>
@@ -386,20 +386,20 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             )}
 
             {positionMarket ? (
-              <div className="text-xs bg-gray-800 border border-gray-600 rounded p-2 text-gray-300 flex justify-between items-center gap-3">
+              <div className="text-xs bg-zinc-800 border border-zinc-700 rounded-lg p-2.5 text-zinc-300 flex justify-between items-center gap-3">
                 <div>
                   Selected market: <span className="text-white">{positionMarket.question}</span>
-                  <span className="text-gray-500"> ({positionMarket.source} · {positionMarket.market_id})</span>
+                  <span className="text-zinc-500"> ({positionMarket.source} · {positionMarket.market_id})</span>
                 </div>
                 <button
                   onClick={() => setPositionMarket(null)}
-                  className="text-red-300 hover:text-red-200 whitespace-nowrap"
+                  className="text-red-300 hover:text-red-200 whitespace-nowrap transition-colors"
                 >
                   Clear
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded p-2">
+              <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded-lg p-2">
                 Choose a market first. Position details appear afterward.
               </p>
             )}
@@ -408,7 +408,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">
+                    <label className="block text-xs text-zinc-400 mb-1">
                       Is this already taken or being considered?
                     </label>
                     <select
@@ -417,18 +417,18 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                         setStatus(e.target.value as Status);
                         setFormError('');
                       }}
-                      className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                      className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
                     >
                       <option value="current">Already Taken</option>
                       <option value="proposed">Considering</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Side</label>
+                    <label className="block text-xs text-zinc-400 mb-1">Side</label>
                     <select
                       value={side}
                       onChange={(e) => setSide(e.target.value as Side)}
-                      className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                      className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
                     >
                       <option value="YES">YES</option>
                       <option value="NO">NO</option>
@@ -439,7 +439,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                 {status === 'current' ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Your Entry Price (cents)</label>
+                      <label className="block text-xs text-zinc-400 mb-1">Your Entry Price (cents)</label>
                       <input
                         type="number"
                         min="0.1"
@@ -448,49 +448,49 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                         value={entryPriceCents}
                         onChange={(e) => setEntryPriceCents(e.target.value)}
                         placeholder="Manual input for existing position"
-                        className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Stake ($)</label>
+                      <label className="block text-xs text-zinc-400 mb-1">Stake ($)</label>
                       <input
                         type="number"
                         min="1"
                         step="1"
                         value={stakeUsd}
                         onChange={(e) => setStakeUsd(e.target.value)}
-                        className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                       />
                     </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Live Entry Price (cents)</label>
+                      <label className="block text-xs text-zinc-400 mb-1">Live Entry Price (cents)</label>
                       <input
                         type="text"
                         readOnly
                         value={liveEntryPriceCents != null ? formatCents(liveEntryPriceCents) : 'Unavailable'}
-                        className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2 text-sm border border-gray-600"
+                        className="w-full bg-zinc-700 text-zinc-200 rounded-lg px-3 py-2 text-sm border border-zinc-600 tabular-nums"
                       />
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-zinc-500 mt-1">
                         Auto-filled from current market price for {side}.
                       </p>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Stake ($)</label>
+                      <label className="block text-xs text-zinc-400 mb-1">Stake ($)</label>
                       <input
                         type="number"
                         min="1"
                         step="1"
                         value={stakeUsd}
                         onChange={(e) => setStakeUsd(e.target.value)}
-                        className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                       />
                     </div>
                     {liveEntryPriceCents == null && (
                       <div className="md:col-span-2">
-                        <label className="block text-xs text-gray-400 mb-1">Fallback Entry Price (cents)</label>
+                        <label className="block text-xs text-zinc-400 mb-1">Fallback Entry Price (cents)</label>
                         <input
                           type="number"
                           min="0.1"
@@ -499,7 +499,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                           value={entryPriceCents}
                           onChange={(e) => setEntryPriceCents(e.target.value)}
                           placeholder="Only needed when live price is unavailable"
-                          className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                          className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                         />
                       </div>
                     )}
@@ -507,12 +507,12 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                 )}
 
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Notes</label>
+                  <label className="block text-xs text-zinc-400 mb-1">Notes</label>
                   <input
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Optional context for this leg"
-                    className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
                   />
                 </div>
 
@@ -520,7 +520,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
 
                 <button
                   onClick={addPosition}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-semibold"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
                 >
                   Add Position
                 </button>
@@ -528,22 +528,22 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             )}
           </div>
 
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-            <p className="text-sm font-semibold text-gray-200 mb-3">2. Recommendation Preferences</p>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-3">2. Recommendation Preferences</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              <label className="flex items-center gap-2 text-gray-300">
+              <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
                 <input type="checkbox" checked={goalHedge} onChange={() => setGoalHedge((v) => !v)} />
                 Hedge correlated risk
               </label>
-              <label className="flex items-center gap-2 text-gray-300">
+              <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
                 <input type="checkbox" checked={goalArb} onChange={() => setGoalArb((v) => !v)} />
                 Find arbitrage-like spreads
               </label>
-              <label className="flex items-center gap-2 text-gray-300">
+              <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
                 <input type="checkbox" checked={goalDownside} onChange={() => setGoalDownside((v) => !v)} />
                 Minimize downside
               </label>
-              <label className="flex items-center gap-2 text-gray-300">
+              <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
                 <input type="checkbox" checked={goalPnL} onChange={() => setGoalPnL((v) => !v)} />
                 Return PnL visual data
               </label>
@@ -551,28 +551,28 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Max New Positions</label>
+                <label className="block text-xs text-zinc-400 mb-1">Max New Positions</label>
                 <input
                   type="number"
                   min="1"
                   max="10"
                   value={maxNewPositions}
                   onChange={(e) => setMaxNewPositions(e.target.value)}
-                  className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                  className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Hedge Budget ($)</label>
+                <label className="block text-xs text-zinc-400 mb-1">Hedge Budget ($)</label>
                 <input
                   type="number"
                   min="0"
                   value={hedgeBudgetUsd}
                   onChange={(e) => setHedgeBudgetUsd(e.target.value)}
-                  className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                  className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Min Correlation Score</label>
+                <label className="block text-xs text-zinc-400 mb-1">Min Correlation Score</label>
                 <input
                   type="number"
                   min="0"
@@ -580,7 +580,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                   step="0.05"
                   value={minCorrelation}
                   onChange={(e) => setMinCorrelation(e.target.value)}
-                  className="w-full bg-gray-800 text-white rounded px-3 py-2 text-sm border border-gray-600"
+                  className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border border-zinc-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 tabular-nums"
                 />
               </div>
             </div>
@@ -588,41 +588,41 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
         </div>
 
         <div className="xl:col-span-2 space-y-5">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-gray-200">Positions Added ({positions.length})</p>
+              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Positions Added (<span className="tabular-nums">{positions.length}</span>)</p>
               <button
                 onClick={() => setPositions([])}
                 disabled={!positions.length}
-                className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
+                className="text-xs text-zinc-500 hover:text-white disabled:opacity-40 transition-colors"
               >
                 Clear
               </button>
             </div>
             {positions.length === 0 ? (
-              <p className="text-sm text-gray-500">No positions yet. Add one from the form.</p>
+              <p className="text-sm text-zinc-500">No positions yet. Add one from the form.</p>
             ) : (
               <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                 {positions.map((position) => {
                   const maxProfit = calcMaxProfit(position.entry_price_cents, position.stake_usd);
                   return (
-                    <div key={position.id} className="bg-gray-800 rounded-lg border border-gray-700 p-3">
+                    <div key={position.id} className="bg-zinc-800 rounded-lg border border-zinc-700 p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm text-white">{position.market_question}</p>
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-zinc-400 mt-1">
                             {position.source} · {position.side} · {position.status}
                           </p>
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-zinc-500 mt-1 tabular-nums">
                             Entry {position.entry_price_cents.toFixed(1)}¢ · Stake $
                             {position.stake_usd.toFixed(0)} · Max loss ${position.stake_usd.toFixed(0)} · Max
                             profit ${maxProfit.toFixed(0)}
                           </p>
-                          {position.notes && <p className="text-xs text-gray-500 mt-1">Note: {position.notes}</p>}
+                          {position.notes && <p className="text-xs text-zinc-500 mt-1">Note: {position.notes}</p>}
                         </div>
                         <button
                           onClick={() => setPositions((prev) => prev.filter((item) => item.id !== position.id))}
-                          className="text-xs text-red-300 hover:text-red-200"
+                          className="text-xs text-red-300 hover:text-red-200 transition-colors"
                         >
                           Remove
                         </button>
@@ -634,15 +634,15 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             )}
           </div>
 
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-sm font-semibold text-gray-200">Market Graph</p>
+              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Market Graph</p>
               {graphCandidates.length > 0 && (
                 <div className="flex items-center gap-2">
                   <select
                     value={graphMarketId}
                     onChange={(e) => setGraphMarketId(e.target.value)}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600 max-w-[220px]"
+                    className="bg-zinc-800 text-white rounded-lg px-2 py-1.5 text-xs border border-zinc-700 max-w-[220px] focus:outline-none focus:border-indigo-500"
                   >
                     {graphCandidates.map((candidate) => (
                       <option key={candidate.id} value={candidate.id}>
@@ -653,7 +653,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                   <select
                     value={graphInterval}
                     onChange={(e) => setGraphInterval(e.target.value as '1m' | '1w' | 'max')}
-                    className="bg-gray-800 text-white rounded px-2 py-1.5 text-xs border border-gray-600"
+                    className="bg-zinc-800 text-white rounded-lg px-2 py-1.5 text-xs border border-zinc-700 focus:outline-none focus:border-indigo-500"
                   >
                     <option value="1m">1m</option>
                     <option value="1w">1w</option>
@@ -664,37 +664,37 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             </div>
 
             {graphCandidates.length === 0 ? (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-zinc-500">
                 Select a Polymarket market to view its price history.
               </p>
             ) : graphLoading ? (
-              <p className="text-sm text-gray-400">Loading history...</p>
+              <p className="text-sm text-zinc-400 animate-pulse">Loading history...</p>
             ) : graphError ? (
               <p className="text-sm text-red-400">{graphError}</p>
             ) : graphSeries.length === 0 ? (
-              <p className="text-sm text-gray-500">No history data available for this market.</p>
+              <p className="text-sm text-zinc-500">No history data available for this market.</p>
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={250}>
                   <LineChart data={graphSeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                     <XAxis
                       dataKey="t"
                       tickFormatter={formatTime}
-                      stroke="#6b7280"
-                      tick={{ fill: '#9ca3af', fontSize: 10 }}
+                      stroke="#52525b"
+                      tick={{ fill: '#71717a', fontSize: 10 }}
                     />
                     <YAxis
                       domain={[0, 100]}
                       tickFormatter={(v) => `${Number(v).toFixed(0)}¢`}
-                      stroke="#6b7280"
-                      tick={{ fill: '#9ca3af', fontSize: 10 }}
+                      stroke="#52525b"
+                      tick={{ fill: '#71717a', fontSize: 10 }}
                     />
                     <Tooltip
                       formatter={(value: any) => [`${Number(value).toFixed(2)}¢`, 'YES price']}
                       labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
-                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
-                      labelStyle={{ color: '#9ca3af' }}
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                      labelStyle={{ color: '#71717a' }}
                     />
                     <Line
                       type="monotone"
@@ -706,7 +706,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                     />
                   </LineChart>
                 </ResponsiveContainer>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-zinc-500 mt-2 tabular-nums">
                   Current YES price: {graphCurrentPrice != null ? `${graphCurrentPrice.toFixed(2)}¢` : 'N/A'}
                 </p>
               </>

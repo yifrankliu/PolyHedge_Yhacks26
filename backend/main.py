@@ -218,25 +218,34 @@ async def fetch_clob_history_cached(condition_id: str) -> tuple[str, list] | Non
 # ── Tag helpers ───────────────────────────────────────────────────────────────
 
 async def fetch_tags_cached() -> list[dict]:
-    """Fetch all Gamma tags, cached 24h. Returns [{id, slug, label, count}]."""
+    """
+    Derive tags from live open events — guarantees every returned tag has open markets.
+    Fetches top 100 events by volume, extracts unique tags, caches 24h.
+    """
     global _tag_cache
     if time.time() - _tag_cache["fetched_at"] < TAG_CACHE_TTL and _tag_cache["tags"]:
-        print(f"[TAGS] fetch_tags_cached: serving {len(_tag_cache['tags'])} tags from cache")
         return _tag_cache["tags"]
-    url = f"{POLYMARKET_GAMMA}/tags"
-    print(f"[TAGS] fetch_tags_cached → GET {url} params={{limit: 200}}")
+    url = f"{POLYMARKET_GAMMA}/events"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url, params={"limit": 200})
-        print(f"[TAGS] fetch_tags_cached ← status={resp.status_code} body[:200]={resp.text[:200]!r}")
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, params={"closed": "false", "order": "volume", "ascending": "false", "limit": 100})
         if resp.status_code == 200:
-            tags = resp.json() if isinstance(resp.json(), list) else []
-            print(f"[TAGS] fetch_tags_cached: fetched {len(tags)} tags, caching")
+            events = resp.json() if isinstance(resp.json(), list) else []
+            # Collect unique tags, track how many events each appears in
+            seen: dict[str, dict] = {}
+            for event in events:
+                for tag in event.get("tags") or []:
+                    tid = str(tag.get("id", ""))
+                    if not tid or not tag.get("label"):
+                        continue
+                    if tid not in seen:
+                        seen[tid] = {"id": tag["id"], "slug": tag.get("slug", ""), "label": tag["label"], "count": 0}
+                    seen[tid]["count"] += 1
+            tags = sorted(seen.values(), key=lambda t: -t["count"])
             _tag_cache = {"tags": tags, "fetched_at": time.time()}
             return tags
     except Exception as e:
         print(f"[TAGS] fetch_tags_cached EXCEPTION: {type(e).__name__}: {e}")
-    print(f"[TAGS] fetch_tags_cached: returning stale ({len(_tag_cache['tags'])} tags)")
     return _tag_cache["tags"]  # serve stale on failure
 
 
@@ -843,27 +852,42 @@ async def list_tags():
 
 @app.get("/markets/polymarket/by-tag")
 async def markets_by_tag(tag_id: int = Query(...), limit: int = Query(20, le=50)):
-    """Fetch open Polymarket markets for a specific tag_id, ordered by volume."""
-    async with httpx.AsyncClient(timeout=10) as client:
+    """Fetch open Polymarket markets for a specific tag_id via the /events endpoint (tag_id filter only works there)."""
+    # Fetch up to 10 events for this tag, each event contains N markets
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"{POLYMARKET_GAMMA}/markets",
-            params={"tag_id": tag_id, "closed": "false", "order": "volumeNum", "ascending": "false", "limit": limit},
+            f"{POLYMARKET_GAMMA}/events",
+            params={"tag_id": tag_id, "closed": "false", "order": "volume", "ascending": "false", "limit": 10},
         )
     if resp.status_code != 200:
         raise HTTPException(502, f"Gamma API error: {resp.status_code}")
-    raw = resp.json()
-    markets = raw if isinstance(raw, list) else raw.get("markets", [])
-    return [
-        {
-            "id": m.get("conditionId") or str(m.get("id")),
-            "question": m.get("question"),
-            "price": float(m.get("lastTradePrice") or 0),
-            "volume": m.get("volumeNum") or m.get("volume"),
-            "end_date": m.get("endDateIso") or m.get("endDate"),
-            "source": "polymarket",
-        }
-        for m in markets if m.get("conditionId") or m.get("id")
-    ]
+    events = resp.json()
+    if not isinstance(events, list):
+        events = events.get("data", events.get("events", []))
+
+    # Flatten markets from all events, deduplicate by conditionId
+    seen: set[str] = set()
+    results = []
+    for event in events:
+        for m in event.get("markets") or []:
+            cid = m.get("conditionId") or str(m.get("id", ""))
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            results.append({
+                "id": cid,
+                "question": m.get("question"),
+                "price": float(m.get("lastTradePrice") or 0),
+                "volume": m.get("volumeNum") or m.get("volume"),
+                "end_date": m.get("endDateIso") or m.get("endDate"),
+                "source": "polymarket",
+            })
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+
+    return results
 
 
 @app.get("/markets/polymarket/search")

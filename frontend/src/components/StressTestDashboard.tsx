@@ -14,7 +14,7 @@ const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
 export default function StressTestDashboard({ position, hedge }: Props) {
   if (!position || !hedge) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-white">Stress Test</h2>
           <p className="text-zinc-400 text-sm mt-1">
@@ -34,7 +34,7 @@ export default function StressTestDashboard({ position, hedge }: Props) {
   const ep = clamp(position.entry_price_cents / 100);
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
 
       {/* Strategy summary card */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5 mb-6">

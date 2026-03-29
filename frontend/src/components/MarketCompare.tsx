@@ -47,15 +47,15 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
 }) {
   if (loading) {
     return (
-      <div className="bg-gray-900 rounded-xl border border-gray-700 p-6 flex items-center justify-center h-40">
-        <p className="text-gray-500 text-sm animate-pulse">Computing correlation…</p>
+      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 flex items-center justify-center h-40">
+        <p className="text-zinc-500 text-sm animate-pulse">Computing correlation…</p>
       </div>
     );
   }
   if (!result) return null;
   if (result.error) {
     return (
-      <div className="bg-gray-900 rounded-xl border border-gray-700 p-6">
+      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
         <p className="text-red-400 text-sm">{result.error}</p>
       </div>
     );
@@ -83,54 +83,54 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
   };
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-6 space-y-6">
+    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-200 uppercase tracking-wider">Correlation Analysis</h3>
+        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Correlation Analysis</h3>
         <div className="flex items-center gap-3">
           {result.short_history_warning && (
-            <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded">Short history</span>
+            <span className="text-xs bg-yellow-900/40 text-yellow-300 px-2 py-0.5 rounded border border-yellow-700/50">Short history</span>
           )}
           {result.break_detected && (
-            <span className="text-xs bg-orange-900 text-orange-300 px-2 py-0.5 rounded">Regime break detected</span>
+            <span className="text-xs bg-orange-900/40 text-orange-300 px-2 py-0.5 rounded border border-orange-700/50">Regime break detected</span>
           )}
           {result.resolution_convergence && (
-            <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded">⚠ Resolution convergence — correlation may be spurious</span>
+            <span className="text-xs bg-yellow-900/40 text-yellow-300 px-2 py-0.5 rounded border border-yellow-700/50">⚠ Resolution convergence — correlation may be spurious</span>
           )}
-          <span className="text-xs text-gray-500">{result.shared_history_days}d shared · {result.n_observations} obs</span>
+          <span className="text-xs text-zinc-500 tabular-nums">{result.shared_history_days}d shared · {result.n_observations} obs</span>
         </div>
       </div>
 
       {/* Key metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Pearson (logit)</p>
-          <p className="text-2xl font-bold" style={{ color: rColor }}>{r >= 0 ? '+' : ''}{r.toFixed(3)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">on returns: {result.full_pearson_returns >= 0 ? '+' : ''}{result.full_pearson_returns.toFixed(3)}</p>
+        <div className="bg-zinc-800 rounded-lg p-3">
+          <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Pearson (logit)</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: rColor }}>{r >= 0 ? '+' : ''}{r.toFixed(3)}</p>
+          <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">on returns: {result.full_pearson_returns >= 0 ? '+' : ''}{result.full_pearson_returns.toFixed(3)}</p>
         </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Rolling Stability</p>
-          <p className="text-xl font-bold text-white">{result.rolling_mean >= 0 ? '+' : ''}{result.rolling_mean.toFixed(3)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">±{result.rolling_std.toFixed(3)} · {(result.rolling_pct_positive * 100).toFixed(0)}% positive</p>
+        <div className="bg-zinc-800 rounded-lg p-3">
+          <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Rolling Stability</p>
+          <p className="text-xl font-bold text-white tabular-nums">{result.rolling_mean >= 0 ? '+' : ''}{result.rolling_mean.toFixed(3)}</p>
+          <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">±{result.rolling_std.toFixed(3)} · {(result.rolling_pct_positive * 100).toFixed(0)}% positive</p>
         </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Lead / Lag</p>
+        <div className="bg-zinc-800 rounded-lg p-3">
+          <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Lead / Lag</p>
           <p className="text-sm font-bold text-white leading-tight mt-1">{lagLabel()}</p>
-          <p className="text-xs text-gray-500 mt-0.5">r={result.lag_correlation.toFixed(3)}</p>
+          <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">r={result.lag_correlation.toFixed(3)}</p>
         </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Granger Causality</p>
+        <div className="bg-zinc-800 rounded-lg p-3">
+          <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Granger Causality</p>
           <p className="text-sm font-bold text-white leading-tight mt-1">{grangerLabel()}</p>
-          <p className="text-xs text-gray-500 mt-0.5">A→B: {result.a_causes_b_pval.toFixed(3)} · B→A: {result.b_causes_a_pval.toFixed(3)}</p>
+          <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">A→B: {result.a_causes_b_pval.toFixed(3)} · B→A: {result.b_causes_a_pval.toFixed(3)}</p>
         </div>
       </div>
 
       {/* Semantic + composite row */}
       {(result.semantic_similarity != null) && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div className="bg-gray-800 rounded-lg p-3">
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Semantic Similarity</p>
+          <div className="bg-zinc-800 rounded-lg p-3">
+            <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Semantic Similarity</p>
             <div className="flex items-center gap-2 mt-1">
-              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div className="flex-1 h-2 bg-zinc-700 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full"
                   style={{
@@ -139,30 +139,30 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
                   }}
                 />
               </div>
-              <span className="text-sm font-bold text-white font-mono">{result.semantic_similarity.toFixed(2)}</span>
+              <span className="text-sm font-bold text-white font-mono tabular-nums">{result.semantic_similarity.toFixed(2)}</span>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-zinc-500 mt-1">
               {result.semantic_similarity > 0.55 ? 'Strongly related topic' :
                result.semantic_similarity > 0.35 ? 'Moderately related' : 'Topically dissimilar'}
             </p>
           </div>
-          <div className="bg-gray-800 rounded-lg p-3">
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Resolution Proximity</p>
-            <p className="text-xl font-bold text-white mt-1">
+          <div className="bg-zinc-800 rounded-lg p-3">
+            <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Resolution Proximity</p>
+            <p className="text-xl font-bold text-white mt-1 tabular-nums">
               {result.end_date_proximity > 0
                 ? `${Math.round(result.end_date_proximity * 100)}%`
                 : '—'}
             </p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-zinc-500 mt-0.5">
               {result.end_date_proximity > 0.9 ? 'Same resolution window' :
                result.end_date_proximity > 0.5 ? 'Close resolution dates' :
                result.end_date_proximity > 0 ? 'Divergent timelines' : 'No date data'}
             </p>
           </div>
-          <div className="bg-gray-800 rounded-lg p-3 md:col-span-1">
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Composite Score</p>
+          <div className="bg-zinc-800 rounded-lg p-3 md:col-span-1">
+            <p className="text-xs text-zinc-400 uppercase tracking-wider mb-1">Composite Score</p>
             <div className="flex items-center gap-2 mt-1">
-              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div className="flex-1 h-2 bg-zinc-700 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full"
                   style={{
@@ -171,9 +171,9 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
                   }}
                 />
               </div>
-              <span className="text-sm font-bold text-white font-mono">{score.toFixed(2)}</span>
+              <span className="text-sm font-bold text-white font-mono tabular-nums">{score.toFixed(2)}</span>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-zinc-500 mt-1">
               Pearson + stability + Granger + semantic + proximity
             </p>
           </div>
@@ -183,36 +183,36 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
       {/* Structural break info */}
       {result.break_detected && result.pre_break_pearson !== null && (
         <div className="flex gap-4 text-sm">
-          <span className="text-gray-400">Pre-break Pearson: <span className="text-white font-medium">{result.pre_break_pearson!.toFixed(3)}</span></span>
-          <span className="text-gray-400">Post-break Pearson: <span className="text-white font-medium">{result.post_break_pearson!.toFixed(3)}</span></span>
+          <span className="text-zinc-400">Pre-break Pearson: <span className="text-white font-medium tabular-nums">{result.pre_break_pearson!.toFixed(3)}</span></span>
+          <span className="text-zinc-400">Post-break Pearson: <span className="text-white font-medium tabular-nums">{result.post_break_pearson!.toFixed(3)}</span></span>
         </div>
       )}
 
       {/* Rolling correlation chart */}
       {result.rolling_series.length > 2 && (
         <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Rolling Correlation (logit prices)</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Rolling Correlation (logit prices)</p>
           <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={result.rolling_series} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                 <XAxis
                   dataKey="t"
                   type="number"
                   domain={['dataMin', 'dataMax']}
                   tickFormatter={(v) => new Date(v * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                  stroke="#6b7280"
-                  tick={{ fill: '#9ca3af', fontSize: 10 }}
+                  stroke="#52525b"
+                  tick={{ fill: '#71717a', fontSize: 10 }}
                   tickCount={6}
                 />
-                <YAxis domain={[-1, 1]} stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 10 }} width={28} tickFormatter={(v) => v.toFixed(1)} />
+                <YAxis domain={[-1, 1]} stroke="#52525b" tick={{ fill: '#71717a', fontSize: 10 }} width={28} tickFormatter={(v) => v.toFixed(1)} />
                 <Tooltip
                   formatter={(v) => [Number(v).toFixed(3), 'Correlation']}
                   labelFormatter={(t) => new Date((t as number) * 1000).toLocaleDateString()}
-                  contentStyle={{ background: '#111827', border: '1px solid #374151' }}
-                  labelStyle={{ color: '#9ca3af' }}
+                  contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                  labelStyle={{ color: '#71717a' }}
                 />
-                <ReferenceLine y={0} stroke="#4b5563" strokeDasharray="4 3" />
+                <ReferenceLine y={0} stroke="#52525b" strokeDasharray="4 3" />
                 <Line type="monotone" dataKey="r" stroke="#818cf8" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -223,20 +223,20 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
       {/* CCF bar chart */}
       {result.lag_series.length > 0 && (
         <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Cross-Correlation Function (logit returns)</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Cross-Correlation Function (logit returns)</p>
           <div className="h-32">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={result.lag_series} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="lag" stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 10 }} />
-                <YAxis domain={[-1, 1]} stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 10 }} width={28} tickFormatter={(v) => v.toFixed(1)} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                <XAxis dataKey="lag" stroke="#52525b" tick={{ fill: '#71717a', fontSize: 10 }} />
+                <YAxis domain={[-1, 1]} stroke="#52525b" tick={{ fill: '#71717a', fontSize: 10 }} width={28} tickFormatter={(v) => v.toFixed(1)} />
                 <Tooltip
                   formatter={(v) => [Number(v).toFixed(3), 'r']}
                   labelFormatter={(l) => `Lag ${l} days`}
-                  contentStyle={{ background: '#111827', border: '1px solid #374151' }}
-                  labelStyle={{ color: '#9ca3af' }}
+                  contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                  labelStyle={{ color: '#71717a' }}
                 />
-                <ReferenceLine y={0} stroke="#4b5563" />
+                <ReferenceLine y={0} stroke="#52525b" />
                 <Bar dataKey="r">
                   {result.lag_series.map((entry, i) => (
                     <Cell key={i} fill={entry.r >= 0 ? '#818cf8' : '#f87171'} />
@@ -301,14 +301,14 @@ function LogicalCorrelationPanel({
   const pct  = result ? Math.round(result.logical_score * 100) : 0;
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-5">
+    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
       {/* Header row */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
             Logical Analysis
           </span>
-          <span className="text-[10px] bg-indigo-900 text-indigo-300 px-1.5 py-0.5 rounded font-medium">
+          <span className="text-[10px] bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-medium">
             AI
           </span>
         </div>
@@ -325,7 +325,7 @@ function LogicalCorrelationPanel({
           <button
             onClick={run}
             disabled={loading}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             {loading ? 'Analyzing…' : 'Re-run'}
           </button>
@@ -334,7 +334,7 @@ function LogicalCorrelationPanel({
 
       {/* Empty / error states */}
       {!result && !loading && !error && (
-        <p className="text-gray-500 text-xs">
+        <p className="text-zinc-500 text-xs">
           Click "Run LLM Analysis" to have Claude Haiku assess whether these
           markets have a logical or causal relationship — beyond what the
           statistics alone can tell you.
@@ -342,7 +342,7 @@ function LogicalCorrelationPanel({
       )}
       {error && <p className="text-red-400 text-xs">{error}</p>}
       {loading && (
-        <div className="flex items-center gap-2 text-gray-500 text-xs animate-pulse">
+        <div className="flex items-center gap-2 text-zinc-500 text-xs animate-pulse">
           <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
           Claude Haiku is reasoning about these markets…
         </div>
@@ -356,12 +356,12 @@ function LogicalCorrelationPanel({
             {/* Score gauge */}
             <div className="flex-1">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-400">Logical Correlation Score</span>
-                <span className="text-sm font-bold font-mono" style={{ color: logicalScoreColor(result.logical_score) }}>
+                <span className="text-xs text-zinc-400">Logical Correlation Score</span>
+                <span className="text-sm font-bold font-mono tabular-nums" style={{ color: logicalScoreColor(result.logical_score) }}>
                   {result.logical_score.toFixed(2)}
                 </span>
               </div>
-              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{
@@ -370,7 +370,7 @@ function LogicalCorrelationPanel({
                   }}
                 />
               </div>
-              <div className="flex justify-between text-[10px] text-gray-600 mt-0.5">
+              <div className="flex justify-between text-[10px] text-zinc-600 mt-0.5">
                 <span>Coincidental</span>
                 <span>Moderate</span>
                 <span>Direct dependency</span>
@@ -387,8 +387,8 @@ function LogicalCorrelationPanel({
           </div>
 
           {/* Explanation */}
-          <div className="border-t border-gray-800 pt-3">
-            <p className="text-sm text-gray-300 leading-relaxed">{result.explanation}</p>
+          <div className="border-t border-zinc-800 pt-3">
+            <p className="text-sm text-zinc-300 leading-relaxed">{result.explanation}</p>
           </div>
         </div>
       )}
@@ -487,10 +487,10 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
                     (marketB && (historyB || loadingB || errorB));
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Market Comparator</h2>
-        <p className="text-gray-400 text-sm mt-1">
+        <p className="text-zinc-400 text-sm mt-1">
           Pick any two Polymarket markets and compare their price histories.
         </p>
       </div>
@@ -504,15 +504,15 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
       {/* Time range selector */}
       {hasCharts && (
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs text-gray-500 uppercase tracking-wider">Range:</span>
+          <span className="text-xs text-zinc-500 uppercase tracking-wider">Range:</span>
           {INTERVALS.map((iv) => (
             <button
               key={iv.value}
               onClick={() => handleIntervalChange(iv.value)}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                 interval === iv.value
                   ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}
             >
               {iv.label}
@@ -548,8 +548,8 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
           />
         )}
         {!marketA && !marketB && (
-          <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
-            <p className="text-gray-500 text-sm">Search and select markets above to see their charts.</p>
+          <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex items-center justify-center h-48">
+            <p className="text-zinc-500 text-sm">Search and select markets above to see their charts.</p>
           </div>
         )}
       </div>

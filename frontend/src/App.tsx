@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Logo from './components/Logo';
 import MarketCompare from './components/MarketCompare';
 import CorrelationScanner from './components/CorrelationScanner';
 import { Market, HedgeRecommendation } from './api/client';
@@ -48,19 +49,22 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-zinc-950 text-white">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900">
+      <header className="border-b border-zinc-800 bg-zinc-900">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">
-              PolyHedge
-            </h1>
-            <p className="text-xs text-gray-500">
-              TradFi-grade tools for prediction markets
-            </p>
+          <div className="flex items-center gap-2.5">
+            <Logo size={28} />
+            <div>
+              <h1 className="text-lg font-bold text-white tracking-tight">
+                PolyHedge
+              </h1>
+              <p className="text-xs text-zinc-500">
+                TradFi-grade tools for prediction markets
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
             Live data
           </div>
@@ -78,13 +82,13 @@ export default function App() {
                   activeTab === tab.id
                     ? 'border-indigo-500 text-indigo-400'
                     : tab.disabled
-                    ? 'border-transparent text-gray-600 cursor-not-allowed'
-                    : 'border-transparent text-gray-400 hover:text-gray-200'
+                    ? 'border-transparent text-zinc-600 cursor-not-allowed'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 {tab.label}
                 {tab.disabled && (
-                  <span className="ml-1.5 text-xs bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">
+                  <span className="ml-1.5 text-xs bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">
                     soon
                   </span>
                 )}

@@ -256,7 +256,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
   // ── Empty states ───────────────────────────────────────────────────────────
   if (!pos) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <Header />
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex items-center justify-center h-48 mt-6">
           <p className="text-zinc-500 text-sm">Add a position in the Position Input tab first.</p>
@@ -267,7 +267,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
 
   if (recommendations.length === 0) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <Header />
         <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex items-center justify-center h-48 mt-6">
           <p className="text-zinc-500 text-sm">
@@ -282,7 +282,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
   const activePalette = PALETTE[activeIdx % PALETTE.length];
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto space-y-5">
       <Header />
 
       {/* Position summary bar */}

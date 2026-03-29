@@ -37,10 +37,10 @@ function compositeBar(score: number) {
   const color = score > 0.6 ? '#34d399' : score > 0.35 ? '#fbbf24' : '#9ca3af';
   return (
     <div className="flex items-center gap-2">
-      <div className="w-20 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+      <div className="w-20 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
-      <span className="text-xs font-mono text-gray-300">{score.toFixed(2)}</span>
+      <span className="text-xs font-mono text-zinc-300 tabular-nums">{score.toFixed(2)}</span>
     </div>
   );
 }
@@ -57,10 +57,10 @@ function semanticBar(sim: number) {
   const color = sim > 0.55 ? '#818cf8' : sim > 0.35 ? '#a78bfa' : '#6b7280';
   return (
     <div className="flex items-center gap-2">
-      <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+      <div className="w-12 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
-      <span className="text-xs font-mono" style={{ color }}>{sim.toFixed(2)}</span>
+      <span className="text-xs font-mono tabular-nums" style={{ color }}>{sim.toFixed(2)}</span>
     </div>
   );
 }
@@ -175,10 +175,10 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
   const progressPct = total > 0 ? Math.round((scanned / total) * 100) : 0;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Correlation Scanner</h2>
-        <p className="text-gray-400 text-sm mt-1">
+        <p className="text-zinc-400 text-sm mt-1">
           Pick any market and scan the top 1,000 Polymarket markets to find the most statistically correlated ones.
         </p>
       </div>
@@ -209,13 +209,13 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
 
         {(scanning || done) && total > 0 && (
           <div className="mt-3">
-            <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+            <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>
-                {done ? 'Complete' : 'Scanning'} — {scanned.toLocaleString()} / {total.toLocaleString()} markets · <span className="text-indigo-300 font-medium">{found} found</span>
+                {done ? 'Complete' : 'Scanning'} — <span className="tabular-nums">{scanned.toLocaleString()} / {total.toLocaleString()}</span> markets · <span className="text-indigo-300 font-medium tabular-nums">{found} found</span>
               </span>
-              <span>{progressPct}%</span>
+              <span className="tabular-nums">{progressPct}%</span>
             </div>
-            <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-zinc-700 rounded-full overflow-hidden">
               <div
                 className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                 style={{ width: `${progressPct}%` }}
@@ -232,36 +232,36 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
 
       {/* Results table */}
       {results.length > 0 && (
-        <div className="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-700 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+        <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+          <div className="px-5 py-3 border-b border-zinc-800 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
               Top Correlated Markets {!done && <span className="text-indigo-400 animate-pulse">· live</span>}
             </h3>
-            <span className="text-xs text-gray-500">{results.length} results</span>
+            <span className="text-xs text-zinc-500 tabular-nums">{results.length} results</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left px-5 py-2.5 text-xs text-gray-500 font-medium w-8">#</th>
-                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Market</th>
-                  <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Price</th>
-                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Composite</th>
-                  <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Pearson r</th>
-                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Semantic</th>
-                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">
+                <tr className="border-b border-zinc-800 bg-zinc-800/60">
+                  <th className="text-left px-5 py-2.5 text-xs text-zinc-500 font-medium w-8">#</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-zinc-500 font-medium">Market</th>
+                  <th className="text-right px-3 py-2.5 text-xs text-zinc-500 font-medium">Price</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-zinc-500 font-medium">Composite</th>
+                  <th className="text-right px-3 py-2.5 text-xs text-zinc-500 font-medium">Pearson r</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-zinc-500 font-medium">Semantic</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-zinc-500 font-medium">
                     Logic
                     <span className="ml-1 text-[9px] bg-indigo-900 text-indigo-300 px-1 py-0.5 rounded">AI</span>
                   </th>
-                  <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Lead/Lag</th>
-                  <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Days</th>
+                  <th className="text-right px-3 py-2.5 text-xs text-zinc-500 font-medium">Lead/Lag</th>
+                  <th className="text-right px-3 py-2.5 text-xs text-zinc-500 font-medium">Days</th>
                   <th className="px-3 py-2.5 w-16"></th>
                 </tr>
               </thead>
               <tbody>
                 {results.slice(0, 25).map((r, i) => (
-                  <tr key={r.market_id} className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
-                    <td className="px-5 py-3 text-gray-500 text-xs">{i + 1}</td>
+                  <tr key={r.market_id} className="border-b border-zinc-800 hover:bg-zinc-800/50 transition-colors">
+                    <td className="px-5 py-3 text-zinc-500 text-xs tabular-nums">{i + 1}</td>
                     <td className="px-3 py-3 max-w-xs">
                       <p className="text-white text-xs leading-snug line-clamp-2">{r.question}</p>
                       {r.break_detected && (
@@ -271,11 +271,11 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                         <span className="text-xs text-yellow-600 mt-0.5 block">⚠ resolution convergence</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right text-gray-300 text-xs font-mono">
+                    <td className="px-3 py-3 text-right text-zinc-300 text-xs font-mono tabular-nums">
                       {(r.last_price * 100).toFixed(1)}¢
                     </td>
                     <td className="px-3 py-3">{compositeBar(r.composite_score)}</td>
-                    <td className="px-3 py-3 text-right font-mono text-xs font-bold" style={{ color: pearsonColor(r.full_pearson) }}>
+                    <td className="px-3 py-3 text-right font-mono text-xs font-bold tabular-nums" style={{ color: pearsonColor(r.full_pearson) }}>
                       {r.full_pearson >= 0 ? '+' : ''}{r.full_pearson.toFixed(3)}
                     </td>
                     <td className="px-3 py-3">
@@ -288,7 +288,7 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                         <div className="group relative">
                           <div className="flex items-center gap-1.5">
                             {/* Score bar */}
-                            <div className="w-10 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            <div className="w-10 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
                               <div
                                 className="h-full rounded-full"
                                 style={{
@@ -306,11 +306,11 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                             </span>
                           </div>
                           {/* Hover tooltip with explanation */}
-                          <div className="hidden group-hover:block absolute z-20 left-0 bottom-full mb-1 w-64 bg-gray-800 border border-gray-600 rounded-lg p-2.5 shadow-xl">
+                          <div className="hidden group-hover:block absolute z-20 left-0 bottom-full mb-1 w-64 bg-zinc-800 border border-zinc-700 rounded-lg p-2.5 shadow-xl">
                             <p className="text-[10px] text-indigo-300 font-medium mb-1">
-                              Logical score: {logicMap[r.market_id].logical_score.toFixed(2)}
+                              Logical score: <span className="tabular-nums">{logicMap[r.market_id].logical_score.toFixed(2)}</span>
                             </p>
-                            <p className="text-xs text-gray-300 leading-snug">
+                            <p className="text-xs text-zinc-300 leading-snug">
                               {logicMap[r.market_id].explanation}
                             </p>
                           </div>
@@ -325,10 +325,10 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                         </button>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right text-xs text-gray-400">
+                    <td className="px-3 py-3 text-right text-xs text-zinc-400 tabular-nums">
                       {lagLabel(r.best_lag_days, r.lead_direction)}
                     </td>
-                    <td className="px-3 py-3 text-right text-xs text-gray-500">
+                    <td className="px-3 py-3 text-right text-xs text-zinc-500 tabular-nums">
                       {Math.round(r.shared_history_days)}d
                     </td>
                     <td className="px-3 py-3 text-right">
@@ -344,7 +344,7 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                             source: 'polymarket',
                           }
                         )}
-                        className="text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-200 px-2 py-1 rounded transition-colors"
+                        className="text-xs bg-indigo-900/60 hover:bg-indigo-800 text-indigo-300 px-2 py-1 rounded-lg transition-colors"
                         title="Open in Market Comparator"
                       >
                         Compare →
@@ -360,13 +360,13 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
 
       {/* Empty state */}
       {!scanning && !done && !results.length && selectedMarket && (
-        <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
-          <p className="text-gray-500 text-sm">Click "Scan 1,000 Markets" to find correlated markets.</p>
+        <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex items-center justify-center h-40">
+          <p className="text-zinc-500 text-sm">Click "Scan 1,000 Markets" to find correlated markets.</p>
         </div>
       )}
       {!selectedMarket && !scanning && (
-        <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
-          <p className="text-gray-500 text-sm">Search for a market above to get started.</p>
+        <div className="bg-zinc-900 rounded-xl border border-zinc-800 flex items-center justify-center h-40">
+          <p className="text-zinc-500 text-sm">Search for a market above to get started.</p>
         </div>
       )}
     </div>
