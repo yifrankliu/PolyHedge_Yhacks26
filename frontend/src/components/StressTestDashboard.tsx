@@ -35,12 +35,6 @@ export default function StressTestDashboard({ position, hedge }: Props) {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white">Stress Test</h2>
-        <p className="text-zinc-400 text-sm mt-1">
-          Monte Carlo simulation, scenario replay, and walk-forward OOS validation for a position + hedge pair.
-        </p>
-      </div>
 
       {/* Strategy summary card */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5 mb-6">

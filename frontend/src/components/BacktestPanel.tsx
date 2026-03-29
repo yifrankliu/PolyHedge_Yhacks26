@@ -245,15 +245,18 @@ export default function BacktestPanel({
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Stress Test</h3>
-          <p className="text-[11px] text-zinc-500 mt-0.5 max-w-lg line-clamp-1">{questionB}</p>
-          <p className="text-[10px] text-zinc-600 mt-1">
-            {meta.n_shared_days}d shared history · {meta.n_returns} returns · {sim.n_sim.toLocaleString()} simulations
-          </p>
-        </div>
+      {/* Stats bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {[
+          [`${meta.n_shared_days}d`, 'shared history'],
+          [`${meta.n_returns}`, 'returns'],
+          [`${sim.n_sim.toLocaleString()}`, 'simulations'],
+        ].map(([val, lbl]) => (
+          <div key={lbl} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-baseline gap-1.5">
+            <span className="text-sm font-bold text-white tabular-nums">{val}</span>
+            <span className="text-[10px] text-zinc-500">{lbl}</span>
+          </div>
+        ))}
       </div>
 
       {/* Warnings */}
