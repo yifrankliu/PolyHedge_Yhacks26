@@ -251,7 +251,13 @@ const DEFAULT_MIN_EVENTS = 8;
 const DEFAULT_MIN_SHARED_DAYS = 32;
 const DEFAULT_TOP_N = 75;
 
-export default function HedgeScanner({ initialPositions = [] }: { initialPositions?: PortfolioPosition[] }) {
+export default function HedgeScanner({
+  initialPositions = [],
+  onRecommendationsUpdate,
+}: {
+  initialPositions?: PortfolioPosition[];
+  onRecommendationsUpdate?: (recs: HedgeRecommendation[], pos: PortfolioPosition) => void;
+}) {
   const [scanning, setScanning] = useState(false);
   const [done, setDone] = useState(false);
   const [scanned, setScanned] = useState(0);
@@ -305,9 +311,13 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
         setScanned(d.scanned);
         setFoundCount(d.found);
       } else if (d.type === 'result') {
-        setRecommendations(prev =>
-          [...prev, d as HedgeRecommendation].sort((a, b) => b.hedge_confidence - a.hedge_confidence)
-        );
+        setRecommendations(prev => {
+          const next = [...prev, d as HedgeRecommendation].sort(
+            (a, b) => b.hedge_confidence - a.hedge_confidence,
+          );
+          onRecommendationsUpdate?.(next, pos);
+          return next;
+        });
       } else if (d.type === 'done') {
         setScanned(d.scanned);
         setFoundCount(d.found);
