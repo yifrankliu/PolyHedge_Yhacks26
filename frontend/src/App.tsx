@@ -54,7 +54,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">
-              PredictionAnalytics
+              PolyHedge
             </h1>
             <p className="text-xs text-gray-500">
               TradFi-grade tools for prediction markets

@@ -1,4 +1,4 @@
-# PredictionAnalytics — Design & Architecture Reference
+# PolyHedge — Design & Architecture Reference
 
 > Hackathon preparation document. Covers design rationale, algorithms, visualizations, and a critical assessment of strengths and weaknesses.
 

@@ -1,4 +1,4 @@
-# PredictionAnalytics
+# PolyHedge
 
 > TradFi-grade risk management infrastructure for prediction markets — hedge scanning, strategy construction, and Monte Carlo stress testing.
 

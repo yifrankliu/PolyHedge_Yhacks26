@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PredictionAnalytics is a TradFi-grade analytics dashboard for prediction markets (Polymarket + Kalshi), treating prediction market contracts as binary options. Feature 1 (What-If Trade Analyzer) is complete; Features 2–4 are planned stubs.
+PolyHedge is a TradFi-grade analytics dashboard for prediction markets (Polymarket + Kalshi), treating prediction market contracts as binary options. Feature 1 (What-If Trade Analyzer) is complete; Features 2–4 are planned stubs.
 
 ## Commands
 
