@@ -568,6 +568,8 @@ class HedgeRequest(BaseModel):
     asset: Optional[str] = None        # "BTC" or "ETH" — enables BL signal
     threshold: Optional[float] = None  # price threshold in USD
     expiry: Optional[str] = None       # YYYY-MM-DD
+    min_events: int = Field(8, ge=3, le=50)
+    min_shared_days: int = Field(32, ge=5, le=90)
 
 
 class HedgeRecommendation(BaseModel):
@@ -610,6 +612,7 @@ class FailedHedgeCandidate(BaseModel):
     current_price: float
     fail_reason: str
     shared_history_days: Optional[int]
+    n_events: Optional[int]
 
 
 class HedgeResponse(BaseModel):
@@ -629,7 +632,7 @@ class RigorousHedgeRequest(BaseModel):
     search_query: Optional[str] = None
     max_candidates: int = Field(8, ge=1, le=30)
     top_k: int = Field(5, ge=1, le=20)
-    spike_quantile: float = Field(0.9, ge=0.5, le=0.99)
+    spike_quantile: float = Field(0.75, ge=0.5, le=0.99)
     max_events: int = Field(100, ge=10, le=500)
 
 
@@ -1288,6 +1291,128 @@ async def correlate_scan_stream(market_id: str = Query(...)):
     )
 
 
+@app.get("/hedge/scan/stream")
+async def hedge_scan_stream(
+    market_id: str = Query(...),
+    direction: str = Query("YES"),
+    position_size: float = Query(...),
+    min_events: int = Query(8),
+    min_shared_days: int = Query(32),
+    top_n: int = Query(75),
+):
+    """SSE stream: scan the full Polymarket universe for hedge candidates."""
+
+    async def event_gen():
+        def sse(payload: dict) -> str:
+            return f"data: {json.dumps(payload)}\n\n"
+
+        try:
+            user_history = await _fetch_clob_history(market_id)
+        except Exception as e:
+            yield sse({"type": "error", "message": f"Failed to fetch position market history: {e}"})
+            return
+
+        try:
+            universe = await fetch_market_universe(1000)
+        except Exception as e:
+            yield sse({"type": "error", "message": f"Universe fetch failed: {e}"})
+            return
+
+        all_candidates = [m for m in universe if m["conditionId"] != market_id]
+
+        # Pre-filter by semantic similarity — cheap batch encode, keep top 75
+        target_meta = next((m for m in universe if m["conditionId"] == market_id), None)
+        target_question = target_meta["question"] if target_meta else ""
+        candidate_questions = [m["question"] for m in all_candidates]
+        sem_sims = batch_semantic_similarities(target_question, candidate_questions)
+        ranked = sorted(zip(sem_sims, all_candidates), key=lambda x: -x[0])
+        candidates = [m for _, m in ranked[:max(1, top_n)]]
+
+        total = len(candidates)
+        yield sse({"type": "init", "total": total})
+
+        BATCH = 30
+        scanned = 0
+        found = 0
+        failed: list[dict] = []
+
+        for i in range(0, total, BATCH):
+            batch = candidates[i: i + BATCH]
+            hist_results = await asyncio.gather(
+                *[fetch_clob_history_cached(m["conditionId"]) for m in batch],
+                return_exceptions=True,
+            )
+
+            for m, res in zip(batch, hist_results):
+                scanned += 1
+                cid = m["conditionId"]
+                question = m.get("question", "")
+                price = float(m.get("lastTradePrice") or 0)
+
+                if isinstance(res, Exception) or res is None:
+                    failed.append({"candidate_market_id": cid, "question": question, "platform": "polymarket", "current_price": price, "fail_reason": "Failed to fetch price history", "shared_history_days": None, "n_events": None})
+                    continue
+
+                _, hist_b = res
+                corr = correlate(market_id, cid, user_history, hist_b)
+                if corr is None or corr.get("error"):
+                    failed.append({"candidate_market_id": cid, "question": question, "platform": "polymarket", "current_price": price, "fail_reason": corr.get("error", "Correlation failed") if corr else "Correlation failed", "shared_history_days": None, "n_events": None})
+                    continue
+
+                rigorous = rigorous_event_hedge(user_history, hist_b, min_events=min_events, min_shared_days=min_shared_days)
+                if rigorous.get("error"):
+                    failed.append({"candidate_market_id": cid, "question": question, "platform": "polymarket", "current_price": price, "fail_reason": rigorous["error"], "shared_history_days": rigorous.get("n_shared_days"), "n_events": rigorous.get("n_events")})
+                    continue
+
+                raw_ratio = rigorous["hedge_ratio"]
+                abs_ratio = float(abs(raw_ratio))
+                position_sign = 1 if direction == "YES" else -1
+                hedge_direction = "NO" if (raw_ratio * position_sign) < 0 else "YES"
+                hedge_score = rigorous["confidence"]
+                confidence_label = "High confidence" if hedge_score > 0.70 else "Moderate confidence" if hedge_score > 0.45 else "Weak signal"
+                caveats = list(rigorous.get("notes", []))
+                if corr["break_detected"]:
+                    caveats.append("Regime break detected")
+                if corr["rolling_std"] > 0.3:
+                    caveats.append("Unstable rolling correlation")
+
+                found += 1
+                yield sse({
+                    "type": "result",
+                    "candidate_market_id": cid,
+                    "question": question,
+                    "current_price": price,
+                    "platform": "polymarket",
+                    "hedge_direction": hedge_direction,
+                    "hedge_ratio": round(abs_ratio, 4),
+                    "recommended_size": round(abs_ratio * position_size, 2),
+                    "correlation": corr["full_pearson_returns"],
+                    "full_pearson": corr["full_pearson"],
+                    "rolling_std": corr["rolling_std"],
+                    "lead_direction": corr["lead_direction"],
+                    "shared_history_days": float(rigorous["n_shared_days"]),
+                    "n_observations": rigorous["n_returns"],
+                    "composite_score": rigorous["confidence"],
+                    "hedge_confidence": hedge_score,
+                    "confidence_label": confidence_label,
+                    "caveats": caveats,
+                    "stability_discounted": corr["rolling_std"] > 0.3 or corr["break_detected"],
+                    "bl_divergence": None,
+                    "bl_confidence": None,
+                })
+
+            yield sse({"type": "progress", "scanned": scanned, "total": total, "found": found})
+
+        failed.sort(key=lambda x: -(x.get("shared_history_days") or 0))
+        yield sse({"type": "done", "scanned": scanned, "found": found, "failed_candidates": failed[:8]})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/hedge", response_model=HedgeResponse)
 async def hedge_scanner(req: HedgeRequest):
     """
@@ -1334,15 +1459,15 @@ async def hedge_scanner(req: HedgeRequest):
     # ── Step 3: Search Oddpool for candidate markets ───────────────────────────
     candidates: list[dict] = []
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             search_resp = await client.get(
                 f"{ODDPOOL_BASE}/search/events",
-                params={"q": req.search_query, "limit": 20},
+                params={"q": req.search_query, "limit": 100},
                 headers=headers,
             )
         if search_resp.status_code == 200:
             events = search_resp.json() if isinstance(search_resp.json(), list) else []
-            poly_events = [e for e in events if e.get("exchange") == "polymarket"][:4]
+            poly_events = [e for e in events if e.get("exchange") == "polymarket"]
             seen: set[str] = set()
             for event in poly_events:
                 await asyncio.sleep(1.1)
@@ -1363,8 +1488,6 @@ async def hedge_scanner(req: HedgeRequest):
                             "question": m.get("question", ""),
                             "price": float(m.get("last_yes_price") or 0),
                         })
-                if len(candidates) >= 8:
-                    break
         else:
             errors["search"] = f"Oddpool search error: {search_resp.status_code}"
     except Exception as e:
@@ -1397,6 +1520,7 @@ async def hedge_scanner(req: HedgeRequest):
                 current_price=candidate["price"],
                 fail_reason="Failed to fetch price history",
                 shared_history_days=None,
+                n_events=None,
             ))
             continue
         corr = correlate(req.market_id, candidate["id"], user_history, hist)
@@ -1408,10 +1532,11 @@ async def hedge_scanner(req: HedgeRequest):
                 current_price=candidate["price"],
                 fail_reason=corr.get("error", "Correlation failed") if corr else "Correlation failed",
                 shared_history_days=None,
+                n_events=None,
             ))
             continue
 
-        rigorous = rigorous_event_hedge(user_history, hist)
+        rigorous = rigorous_event_hedge(user_history, hist, min_events=req.min_events, min_shared_days=req.min_shared_days)
         if rigorous.get("error"):
             failed_candidates.append(FailedHedgeCandidate(
                 candidate_market_id=candidate["id"],
@@ -1420,6 +1545,7 @@ async def hedge_scanner(req: HedgeRequest):
                 current_price=candidate["price"],
                 fail_reason=rigorous["error"],
                 shared_history_days=rigorous.get("n_shared_days"),
+                n_events=rigorous.get("n_events"),
             ))
             continue
 

@@ -105,21 +105,8 @@ export interface CorrelationResult {
 export const correlateMarkets = (marketA: string, marketB: string) =>
   api.get<CorrelationResult>('/correlate', { params: { market_a: marketA, market_b: marketB } }).then(r => r.data);
 
-export interface PolymarketTag {
-  id: number;
-  slug: string;
-  label: string;
-  count: number;
-}
-
-export const listPolymarketTags = () =>
-  api.get<PolymarketTag[]>('/markets/tags').then(r => r.data);
-
 export const searchPolymarketUnified = (q: string) =>
   api.get<Market[]>('/markets/polymarket/search', { params: { q } }).then(r => r.data);
-
-export const marketsByTag = (tagId: number, limit = 20) =>
-  api.get<Market[]>('/markets/polymarket/by-tag', { params: { tag_id: tagId, limit } }).then(r => r.data);
 
 export const blComparison = (params: {
   asset: string;
@@ -156,6 +143,8 @@ export interface HedgeRequest {
   asset?: string;
   threshold?: number;
   expiry?: string;
+  min_events?: number;
+  min_shared_days?: number;
 }
 
 export interface HedgeRecommendation {
@@ -198,6 +187,7 @@ export interface FailedHedgeCandidate {
   current_price: number;
   fail_reason: string;
   shared_history_days: number | null;
+  n_events: number | null;
 }
 
 export interface HedgeResponse {

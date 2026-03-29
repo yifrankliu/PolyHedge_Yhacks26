@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
 import CorrelationScanner from './components/CorrelationScanner';
 import { Market } from './api/client';
@@ -8,9 +7,8 @@ import HedgeScanner from './components/HedgeScanner';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'portfolio', label: 'Position Input' },
-  { id: 'bl', label: 'Prob Comparison' },
-  { id: 'compare', label: 'Market Comparator' },
   { id: 'scanner', label: 'Correlation Scanner' },
+  { id: 'compare', label: 'Market Comparator' },
   { id: 'hedge', label: 'Hedge Scanner' },
 ];
 
@@ -82,18 +80,19 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
         {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
-        {activeTab === 'bl' && <BLComparison />}
-        {activeTab === 'compare' && (
+{activeTab === 'compare' && (
           <MarketCompare
             initialMarketA={pendingMarketA ?? undefined}
             initialMarketB={pendingMarketB ?? undefined}
           />
         )}
-        {/* Scanner stays mounted to preserve results; hidden when inactive */}
+        {/* Scanner and Hedge Scanner stay mounted to preserve results; hidden when inactive */}
         <div style={{ display: activeTab === 'scanner' ? 'block' : 'none' }}>
           <CorrelationScanner onCompare={handleCompare} />
         </div>
-        {activeTab === 'hedge' && <HedgeScanner initialPositions={hedgePositions} />}
+        <div style={{ display: activeTab === 'hedge' ? 'block' : 'none' }}>
+          <HedgeScanner initialPositions={hedgePositions} />
+        </div>
       </main>
     </div>
   );

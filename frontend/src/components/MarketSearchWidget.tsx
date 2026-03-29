@@ -1,10 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import {
   Market,
-  PolymarketTag,
-  listPolymarketTags,
   searchPolymarketUnified,
-  marketsByTag,
   lookupPolymarketBySlug,
 } from '../api/client';
 import { extractPolymarketSlug, isPolymarketUrl } from '../utils/polymarket';
@@ -17,6 +14,17 @@ interface MarketSearchWidgetProps {
   placeholder?: string;
 }
 
+const CATEGORIES = [
+  { label: 'Crypto', query: 'bitcoin crypto BTC ETH' },
+  { label: 'Politics', query: 'election president congress senate' },
+  { label: 'Economics', query: 'GDP inflation Fed interest rate' },
+  { label: 'Sports', query: 'NBA NFL soccer championship' },
+  { label: 'AI', query: 'AI GPT OpenAI artificial intelligence' },
+  { label: 'Geopolitics', query: 'war ceasefire sanctions Ukraine Russia' },
+  { label: 'Science', query: 'NASA SpaceX climate temperature' },
+  { label: 'Entertainment', query: 'Oscar Emmy Grammy box office' },
+];
+
 export default function MarketSearchWidget({
   onSelect,
   selected = null,
@@ -28,28 +36,13 @@ export default function MarketSearchWidget({
   const [results, setResults] = useState<Market[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tags, setTags] = useState<PolymarketTag[]>([]);
-  const [tagsLoading, setTagsLoading] = useState(false);
-  const [activeTagId, setActiveTagId] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const urlDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Load top tags once on mount
-  useEffect(() => {
-    setTagsLoading(true);
-    listPolymarketTags()
-      .then(data => {
-        // Top 12 by count
-        setTags([...data].sort((a, b) => b.count - a.count).slice(0, 12));
-      })
-      .catch(() => {})
-      .finally(() => setTagsLoading(false));
-  }, []);
 
   const handleQueryChange = (val: string) => {
     setQuery(val);
     setError('');
 
-    // URL paste auto-detect: trigger slug lookup on 200ms debounce
     if (urlDebounceRef.current) clearTimeout(urlDebounceRef.current);
     if (isPolymarketUrl(val)) {
       urlDebounceRef.current = setTimeout(async () => {
@@ -57,7 +50,7 @@ export default function MarketSearchWidget({
         if (!slug) return;
         setLoading(true);
         setResults([]);
-        setActiveTagId(null);
+        setActiveCategory(null);
         try {
           const r = await lookupPolymarketBySlug(slug);
           setResults(r);
@@ -73,7 +66,7 @@ export default function MarketSearchWidget({
 
   const search = async () => {
     if (!query.trim()) return;
-    setActiveTagId(null);
+    setActiveCategory(null);
     setLoading(true);
     setResults([]);
     setError('');
@@ -91,18 +84,18 @@ export default function MarketSearchWidget({
     }
   };
 
-  const handleTagClick = async (tag: PolymarketTag) => {
-    setActiveTagId(tag.id);
+  const handleCategoryClick = async (cat: typeof CATEGORIES[0]) => {
+    setActiveCategory(cat.label);
     setQuery('');
     setResults([]);
     setError('');
     setLoading(true);
     try {
-      const r = await marketsByTag(tag.id);
+      const r = await searchPolymarketUnified(cat.query);
       setResults(r);
-      if (r.length === 0) setError(`No open markets found for "${tag.label}"`);
+      if (r.length === 0) setError(`No open markets found for "${cat.label}"`);
     } catch {
-      setError('Failed to load tag markets');
+      setError('Failed to load category markets');
     } finally {
       setLoading(false);
     }
@@ -112,16 +105,15 @@ export default function MarketSearchWidget({
     onSelect(m);
     setResults([]);
     setQuery('');
-    setActiveTagId(null);
+    setActiveCategory(null);
     setError('');
   };
 
   const handleChange = () => {
-    // Signal "cleared" to parent by passing a market with empty id
     onSelect({ ...(selected as Market), id: '' });
     setResults([]);
     setQuery('');
-    setActiveTagId(null);
+    setActiveCategory(null);
     setError('');
   };
 
@@ -129,7 +121,6 @@ export default function MarketSearchWidget({
 
   return (
     <div className="bg-gray-900 rounded-xl p-5 border border-gray-700">
-      {/* Header label row */}
       {label && (
         <div className="flex items-center gap-2 mb-3">
           <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: accentColor }} />
@@ -137,7 +128,6 @@ export default function MarketSearchWidget({
         </div>
       )}
 
-      {/* Selected market card */}
       {isSelected && (
         <div className="mb-3 p-3 rounded-lg bg-gray-800 border border-gray-600">
           <p className="text-sm text-white font-medium leading-snug">{selected!.question}</p>
@@ -154,7 +144,6 @@ export default function MarketSearchWidget({
         </div>
       )}
 
-      {/* Search input */}
       <div className="flex gap-2 mb-3">
         <input
           value={query}
@@ -172,44 +161,41 @@ export default function MarketSearchWidget({
         </button>
       </div>
 
-      {/* Tag chips — shown when no market selected */}
-      {!isSelected && !tagsLoading && tags.length > 0 && (
+      {/* Category chips */}
+      {!isSelected && (
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {tags.map(tag => (
+          {CATEGORIES.map(cat => (
             <button
-              key={tag.id}
-              onClick={() => handleTagClick(tag)}
+              key={cat.label}
+              onClick={() => handleCategoryClick(cat)}
               className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                activeTagId === tag.id
+                activeCategory === cat.label
                   ? 'bg-indigo-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200 border border-gray-700'
               }`}
             >
-              {tag.label}
+              {cat.label}
             </button>
           ))}
         </div>
       )}
 
-      {/* Error message */}
       {error && !loading && (
         <p className="text-xs text-red-400 mb-2">{error}</p>
       )}
 
-      {/* Loading indicator */}
       {loading && results.length === 0 && (
         <p className="text-xs text-gray-500 text-center py-2 animate-pulse">
-          {activeTagId != null ? 'Loading markets…' : 'Searching…'}
+          {activeCategory ? `Loading ${activeCategory} markets…` : 'Searching…'}
         </p>
       )}
 
-      {/* Results dropdown */}
       {results.length > 0 && (
         <div className="bg-gray-800 rounded-lg border border-gray-700 max-h-56 overflow-y-auto">
-          {activeTagId != null && (
+          {activeCategory && (
             <div className="px-4 py-2 border-b border-gray-700">
               <span className="text-xs text-gray-500">
-                {tags.find(t => t.id === activeTagId)?.label} · {results.length} open markets
+                {activeCategory} · {results.length} markets
               </span>
             </div>
           )}

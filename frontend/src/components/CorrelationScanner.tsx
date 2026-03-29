@@ -162,11 +162,11 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
       </div>
 
       {/* Scan controls */}
-      <div className="flex items-center gap-4 mb-5">
+      <div className="mb-5">
         <button
           onClick={scanning ? stopScan : startScan}
           disabled={!selectedMarket}
-          className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+          className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             scanning
               ? 'bg-red-700 hover:bg-red-600 text-white'
               : 'bg-indigo-600 hover:bg-indigo-500 text-white'
@@ -176,7 +176,7 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
         </button>
 
         {(scanning || done) && total > 0 && (
-          <div className="flex-1">
+          <div className="mt-3">
             <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
               <span>
                 {done ? 'Complete' : 'Scanning'} — {scanned.toLocaleString()} / {total.toLocaleString()} markets · <span className="text-indigo-300 font-medium">{found} found</span>
