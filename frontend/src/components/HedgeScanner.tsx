@@ -393,7 +393,7 @@ export default function HedgeScanner({
       {demoMode && (
         <div className="mb-4 bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
           <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
-          <span className="text-amber-600 text-xs">Pre-loaded BTC $100k scenario · Click Demo Scan to animate 5 hedge candidates</span>
+          <span className="text-amber-600 text-xs">Pre-loaded Iran regime fall scenario · Click Demo Scan to animate 5 hedge candidates</span>
         </div>
       )}
 

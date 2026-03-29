@@ -268,7 +268,7 @@ export default function BacktestPanel({
       {demoMode && (
         <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
           <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
-          <span className="text-amber-600 text-xs">Synthetic Monte Carlo — BTC YES 65¢ $500 hedged with ETH YES 55¢ $145</span>
+          <span className="text-amber-600 text-xs">Synthetic Monte Carlo — Iran regime fall YES 18¢ $500 hedged with regime fall Jun 30 YES 8¢ $68</span>
         </div>
       )}
 

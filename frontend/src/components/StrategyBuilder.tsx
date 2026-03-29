@@ -295,7 +295,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
       {demoMode && (
         <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2.5 flex items-center gap-3">
           <span className="text-amber-400 text-xs font-medium">★ Demo Mode</span>
-          <span className="text-amber-600 text-xs">ETH $4k hedge pre-added to Strategy 1 · Select it, view the P&amp;L curve, then click Test Strategy →</span>
+          <span className="text-amber-600 text-xs">Civil unrest YES hedge pre-added to Strategy 1 · Select it, view the P&amp;L curve, then click Test Strategy →</span>
         </div>
       )}
 
