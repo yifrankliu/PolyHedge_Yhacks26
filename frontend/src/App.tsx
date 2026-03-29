@@ -2,12 +2,13 @@ import { useState } from 'react';
 import WhatIfAnalyzer from './components/WhatIfAnalyzer';
 import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
+import PortfolioInputPage from './components/PortfolioInputPage';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'whatif', label: 'What-If Analyzer' },
   { id: 'bl', label: 'Prob Comparison' },
   { id: 'compare', label: 'Market Comparator' },
-  { id: 'portfolio', label: 'Portfolio', disabled: true },
+  { id: 'portfolio', label: 'Position Input' },
   { id: 'hedge', label: 'Hedge Scanner', disabled: true },
 ];
 
@@ -67,6 +68,7 @@ export default function App() {
         {activeTab === 'whatif' && <WhatIfAnalyzer />}
         {activeTab === 'bl' && <BLComparison />}
         {activeTab === 'compare' && <MarketCompare />}
+        {activeTab === 'portfolio' && <PortfolioInputPage />}
       </main>
     </div>
   );
