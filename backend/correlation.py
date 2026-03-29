@@ -178,6 +178,28 @@ def correlate(
     dates = sa.index
     pa, pb = sa.values, sb.values
 
+    # ── Data quality guards ────────────────────────────────────────────────────
+    # Reject series with too little price variation (constant or near-constant =
+    # LOCF-filled sparse markets or newly created markets with 1–2 trades)
+    if np.std(pa) < 0.005 or np.std(pb) < 0.005:
+        return {
+            "market_a": market_a_id,
+            "market_b": market_b_id,
+            "short_history_warning": True,
+            "n_observations": len(pa),
+            "error": "Insufficient price variation (likely sparse or constant series)",
+        }
+
+    # Detect resolution convergence: both markets effectively resolved near 0 or 1
+    # This causes spurious Pearson correlation (both moved 0.5→1 or 0.5→0 together)
+    final_a, final_b = float(pa[-1]), float(pb[-1])
+    resolution_convergence = (
+        (final_a > 0.92 and final_b > 0.92) or
+        (final_a < 0.08 and final_b < 0.08) or
+        (final_a > 0.92 and final_b < 0.08) or
+        (final_a < 0.08 and final_b > 0.92)
+    )
+
     # Logit levels and returns
     lx = logit(pa)
     ly = logit(pb)
@@ -247,8 +269,12 @@ def correlate(
     # End-date proximity: markets resolving close together are more likely related.
     end_date_bonus   = float(np.clip(end_date_proximity, 0.0, 1.0)) * 0.08
     history_penalty  = 0.3 if short_history_warning else 0
+    # Resolution convergence: both markets converged to 0/1 — correlation is likely
+    # spurious (driven by shared resolution direction, not shared information flow)
+    convergence_penalty = 0.35 if resolution_convergence else 0
     composite = float(np.clip(
-        base + stability_bonus + granger_bonus + semantic_bonus + end_date_bonus - history_penalty,
+        base + stability_bonus + granger_bonus + semantic_bonus + end_date_bonus
+        - history_penalty - convergence_penalty,
         0, 1,
     ))
 
@@ -281,6 +307,7 @@ def correlate(
         # Data quality
         "low_volume_warning": low_volume_warning,
         "short_history_warning": short_history_warning,
+        "resolution_convergence": resolution_convergence,
         # Semantic
         "semantic_similarity": round(sem_sim_clamped, 4),
         "end_date_proximity": round(float(np.clip(end_date_proximity, 0.0, 1.0)), 4),

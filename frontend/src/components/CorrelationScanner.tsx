@@ -31,6 +31,7 @@ interface ScanResult {
   granger_dominant_direction: string | null;
   semantic_similarity: number;
   end_date_proximity: number;
+  resolution_convergence: boolean;
 }
 
 function pearsonColor(r: number): string {
@@ -299,6 +300,9 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                       <p className="text-white text-xs leading-snug line-clamp-2">{r.question}</p>
                       {r.break_detected && (
                         <span className="text-xs text-orange-400 mt-0.5 block">⚠ regime break</span>
+                      )}
+                      {r.resolution_convergence && (
+                        <span className="text-xs text-yellow-600 mt-0.5 block">⚠ resolution convergence</span>
                       )}
                     </td>
                     <td className="px-3 py-3 text-right text-gray-300 text-xs font-mono">

@@ -299,6 +299,9 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
           {result.break_detected && (
             <span className="text-xs bg-orange-900 text-orange-300 px-2 py-0.5 rounded">Regime break detected</span>
           )}
+          {result.resolution_convergence && (
+            <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded">⚠ Resolution convergence — correlation may be spurious</span>
+          )}
           <span className="text-xs text-gray-500">{result.shared_history_days}d shared · {result.n_observations} obs</span>
         </div>
       </div>

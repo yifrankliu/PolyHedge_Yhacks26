@@ -114,17 +114,27 @@ def compute_end_date_proximity(end_a: str | None, end_b: str | None) -> float:
 
 
 async def fetch_market_universe(size: int = 1000) -> list[dict]:
-    """Fetch top `size` active Polymarket markets by volume from Gamma API (cached 1h)."""
+    """Fetch top `size` genuinely open Polymarket markets by volume from Gamma API (cached 1h).
+
+    Filters applied:
+    - closed=false  (excludes resolved markets; active=True alone does NOT mean open)
+    - 0.04 <= lastTradePrice <= 0.96  (excludes effectively resolved markets)
+    - Fetches extra pages to account for the filter reducing the raw count
+    """
     global _universe_cache
     if time.time() - _universe_cache["fetched_at"] < CACHE_TTL and len(_universe_cache["markets"]) >= size:
         return _universe_cache["markets"][:size]
 
-    pages = size // 100
+    # Fetch 2× pages to compensate for filtering; dedup by conditionId
+    pages = (size * 2) // 100
     async with httpx.AsyncClient(timeout=15) as client:
         resps = await asyncio.gather(*[
             client.get(f"{POLYMARKET_GAMMA}/markets", params={
-                "limit": 100, "active": True,
-                "order": "volumeNum", "ascending": False,
+                "limit": 100,
+                "active": True,
+                "closed": False,          # exclude resolved/closed markets
+                "order": "volumeNum",
+                "ascending": False,
                 "offset": i * 100,
             })
             for i in range(pages)
@@ -143,11 +153,15 @@ async def fetch_market_universe(size: int = 1000) -> list[dict]:
                 continue
             if not m.get("clobTokenIds"):
                 continue
+            # Exclude effectively resolved markets (price near 0 or 1)
+            price = float(m.get("lastTradePrice") or 0)
+            if price < 0.04 or price > 0.96:
+                continue
             seen.add(cid)
             markets.append({
                 "conditionId": cid,
                 "question": m.get("question", ""),
-                "lastTradePrice": float(m.get("lastTradePrice") or 0),
+                "lastTradePrice": price,
                 "endDate": m.get("endDateIso") or m.get("endDate"),
             })
 
@@ -181,6 +195,12 @@ async def fetch_clob_history_cached(condition_id: str) -> tuple[str, list] | Non
             return None
 
         history = hist_resp.json().get("history", [])
+        if not history:
+            return None
+        # Reject stale markets: last price point must be within 75 days
+        last_ts = history[-1].get("t", 0)
+        if time.time() - last_ts > 75 * 86400:
+            return None
         _history_cache[condition_id] = (history, time.time())
         return ("", history)
     except Exception:
@@ -503,24 +523,34 @@ async def polymarket_history(market_id: str, interval: str = "1m"):
         raise HTTPException(404, "No YES token found for this market")
     token_id = yes_token["token_id"]
 
-    # Fidelity (minutes per candle): use daily for long ranges to avoid point caps
-    fidelity = 1440 if interval in ("max", "3m") else 60
+    async def _fetch_history(iv: str) -> list:
+        fidelity = 1440 if iv in ("max", "3m") else 60
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://clob.polymarket.com/prices-history",
+                params={"market": token_id, "interval": iv, "fidelity": fidelity},
+            )
+        return r.json().get("history", []) if r.status_code == 200 else []
 
-    # Fetch price history from CLOB API
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            "https://clob.polymarket.com/prices-history",
-            params={"market": token_id, "interval": interval, "fidelity": fidelity},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Polymarket CLOB history error: {resp.status_code}")
+    history = await _fetch_history(interval)
 
-    data = resp.json()
+    # Auto-widen if the requested interval returned too little data (e.g. resolved market
+    # opened in comparator via the scanner which used max-range data)
+    FALLBACK_CHAIN = ["3m", "max"]
+    for fallback in FALLBACK_CHAIN:
+        if len(history) >= 10 or interval == "max":
+            break
+        history = await _fetch_history(fallback)
+        interval = fallback  # update so we don't loop needlessly
+
+    if not history:
+        raise HTTPException(502, "Polymarket CLOB returned no price history for this market")
+
     return {
         "question": clob_market.get("question"),
         "current_price": float(yes_token.get("price") or 0),
         "end_date": clob_market.get("end_date_iso"),
-        "history": [{"t": pt["t"], "p": pt["p"]} for pt in data.get("history", [])],
+        "history": [{"t": pt["t"], "p": pt["p"]} for pt in history],
     }
 
 
@@ -653,6 +683,7 @@ async def correlate_scan_stream(market_id: str = Query(...)):
                         "granger_dominant_direction": corr.get("granger_dominant_direction"),
                         "semantic_similarity": corr["semantic_similarity"],
                         "end_date_proximity": corr["end_date_proximity"],
+                        "resolution_convergence": corr.get("resolution_convergence", False),
                     })
 
             yield sse({"type": "progress", "scanned": scanned, "total": total, "found": found})
