@@ -1338,6 +1338,7 @@ async def correlate_scan_stream(market_id: str = Query(...), target_question: st
         # Pre-compute all candidate embeddings in one batch (fast: ~0.1s for 1000 items)
         candidate_questions = [m["question"] for m in candidates]
         semantic_sims = batch_semantic_similarities(resolved_question, candidate_questions)
+        embed_model_available = _get_embed_model() is not None
 
         # Phase 3 — batch scan
         BATCH = 30
@@ -1365,7 +1366,8 @@ async def correlate_scan_stream(market_id: str = Query(...), target_question: st
                     continue
                 if corr is None or corr.get("error"):
                     continue
-                if corr.get("composite_score", 0) > 0.1 and corr.get("semantic_similarity", 0) > 0.2:
+                sem_ok = (not embed_model_available) or corr.get("semantic_similarity", 0) > 0.2
+                if corr.get("composite_score", 0) > 0.1 and sem_ok:
                     found += 1
                     yield sse({
                         "type": "result",
