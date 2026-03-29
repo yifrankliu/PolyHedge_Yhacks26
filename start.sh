@@ -3,25 +3,16 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Install frontend deps if needed
-if [ ! -d "$ROOT/frontend/node_modules" ]; then
-  echo "Installing frontend dependencies..."
-  cd "$ROOT/frontend" && npm install
+# Production (Railway): React build is pre-committed at frontend/build/
+# and served as static files by FastAPI — no Node needed.
+#
+# Local dev: build the frontend if node_modules exist
+if [ -d "$ROOT/frontend/node_modules" ]; then
+  echo "Building frontend..."
+  cd "$ROOT/frontend" && npm run build
 fi
 
-# Start backend
-echo "Starting backend on http://localhost:8000 ..."
+# Start backend (serves both API and the static React build)
+echo "Starting on http://0.0.0.0:${PORT:-8000} ..."
 cd "$ROOT/backend"
-source venv/bin/activate
-uvicorn main:app --reload --port 8000 &
-BACKEND_PID=$!
-
-# Start frontend
-echo "Starting frontend on http://localhost:3000 ..."
-cd "$ROOT/frontend"
-npm start &
-FRONTEND_PID=$!
-
-# Cleanup on exit
-trap "echo 'Stopping...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT INT TERM
-wait
+exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"

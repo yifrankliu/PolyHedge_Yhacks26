@@ -9,7 +9,8 @@ import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -1180,6 +1181,9 @@ async def correlate_scan_stream(market_id: str = Query(...)):
         event_gen(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/hedge", response_model=HedgeResponse)
 async def hedge_scanner(req: HedgeRequest):
     """
@@ -1351,3 +1355,19 @@ async def hedge_scanner(req: HedgeRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Serve React frontend (production) ─────────────────────────────────────────
+# Looks for the build output at ../frontend/build relative to this file.
+# In Railway, the repo root is mounted so this path works out of the box.
+_FRONTEND_BUILD = os.path.join(os.path.dirname(__file__), "..", "frontend", "build")
+
+if os.path.isdir(_FRONTEND_BUILD):
+    # Serve static assets (JS/CSS/media)
+    app.mount("/static", StaticFiles(directory=os.path.join(_FRONTEND_BUILD, "static")), name="static")
+
+    # Catch-all: serve index.html for any non-API route (React Router support)
+    @app.get("/{full_path:path}")
+    async def serve_react(full_path: str):
+        index = os.path.join(_FRONTEND_BUILD, "index.html")
+        return FileResponse(index)
