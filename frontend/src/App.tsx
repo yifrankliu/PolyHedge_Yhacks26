@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import BLComparison from './components/BLComparison';
 import MarketCompare from './components/MarketCompare';
-import PortfolioInputPage from './components/PortfolioInputPage';
+import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInputPage';
 import HedgeScanner from './components/HedgeScanner';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
@@ -14,6 +14,12 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('portfolio');
+  const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
+
+  const handleScanHedges = (positions: PortfolioPosition[]) => {
+    setHedgePositions(positions);
+    setActiveTab('hedge');
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -64,10 +70,10 @@ export default function App() {
 
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {activeTab === 'portfolio' && <PortfolioInputPage />}
+        {activeTab === 'portfolio' && <PortfolioInputPage onScanHedges={handleScanHedges} />}
         {activeTab === 'bl' && <BLComparison />}
         {activeTab === 'compare' && <MarketCompare />}
-        {activeTab === 'hedge' && <HedgeScanner />}
+        {activeTab === 'hedge' && <HedgeScanner initialPositions={hedgePositions} />}
       </main>
     </div>
   );

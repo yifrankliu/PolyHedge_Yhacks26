@@ -12,7 +12,7 @@ type Side = 'YES' | 'NO';
 type Status = 'current' | 'proposed';
 type MarketInputMode = 'search' | 'manual_id';
 
-type Position = {
+export type PortfolioPosition = {
   id: string;
   market_id: string;
   market_question: string;
@@ -23,6 +23,8 @@ type Position = {
   stake_usd: number;
   notes: string;
 };
+
+type Position = PortfolioPosition;
 
 function MarketLookup({
   title,
@@ -123,7 +125,7 @@ const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
 
 const formatCents = (value: number) => value.toFixed(1);
 
-export default function PortfolioInputPage() {
+export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (positions: PortfolioPosition[]) => void }) {
   const [positionInputMode, setPositionInputMode] = useState<MarketInputMode>('search');
   const [positionMarket, setPositionMarket] = useState<{
     market_id: string;
@@ -610,6 +612,18 @@ export default function PortfolioInputPage() {
           </div>
         </div>
       </div>
+
+      {onScanHedges && (
+        <div className="flex justify-end pt-2">
+          <button
+            onClick={() => onScanHedges(positions)}
+            disabled={positions.length === 0}
+            className="bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+          >
+            Scan for Hedges →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
