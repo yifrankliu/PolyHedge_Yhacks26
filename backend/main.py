@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +39,119 @@ KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
 ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
 ODDPOOL_BASE = "https://api.oddpool.com"
+
+
+def _to_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _matches_query(text: str, query: str) -> bool:
+    query_norm = _normalize_text(query)
+    text_norm = _normalize_text(text)
+    if not query_norm:
+        return True
+    if not text_norm:
+        return False
+
+    text_tokens = text_norm.split()
+    token_set = set(text_tokens)
+    for token in query_norm.split():
+        if len(token) <= 3:
+            if token not in token_set:
+                return False
+        else:
+            if token in token_set:
+                continue
+            if not any(t.startswith(token) for t in text_tokens):
+                return False
+    return True
+
+
+def _polymarket_yes_price(market: dict):
+    # Gamma payloads are inconsistent across market versions; try several fields.
+    direct = _to_float(market.get("lastTradePrice"))
+    if direct is not None:
+        return direct
+
+    outcomes_raw = market.get("outcomes")
+    prices_raw = market.get("outcomePrices")
+    if not outcomes_raw or not prices_raw:
+        return None
+
+    outcomes = outcomes_raw
+    prices = prices_raw
+    if isinstance(outcomes, str):
+        try:
+            import json
+            outcomes = json.loads(outcomes)
+        except Exception:
+            outcomes = []
+    if isinstance(prices, str):
+        try:
+            import json
+            prices = json.loads(prices)
+        except Exception:
+            prices = []
+
+    if not isinstance(outcomes, list) or not isinstance(prices, list):
+        return None
+
+    yes_idx = None
+    for i, outcome in enumerate(outcomes):
+        if isinstance(outcome, str) and outcome.strip().lower() == "yes":
+            yes_idx = i
+            break
+    if yes_idx is None or yes_idx >= len(prices):
+        return None
+    return _to_float(prices[yes_idx])
+
+
+def _normalize_polymarket_market(market: dict):
+    return {
+        "id": str(market.get("id")),
+        "question": market.get("question"),
+        "price": _polymarket_yes_price(market),
+        "volume": _to_float(market.get("volume")),
+        "end_date": market.get("endDate"),
+        "source": "polymarket",
+    }
+
+
+def _kalshi_probability(market: dict):
+    # New Kalshi payloads frequently use *_dollars string fields.
+    last_cents = _to_float(market.get("last_price"))
+    if last_cents is not None:
+        return last_cents / 100.0
+
+    last_dollars = _to_float(market.get("last_price_dollars"))
+    if last_dollars is not None:
+        return last_dollars
+
+    yes_bid = _to_float(market.get("yes_bid_dollars"))
+    yes_ask = _to_float(market.get("yes_ask_dollars"))
+    if yes_bid is not None and yes_ask is not None:
+        return (yes_bid + yes_ask) / 2.0
+    return yes_bid if yes_bid is not None else yes_ask
+
+
+def _normalize_kalshi_market(market: dict):
+    return {
+        "id": market.get("ticker"),
+        "question": market.get("title") or market.get("yes_sub_title") or market.get("subtitle"),
+        "price": _kalshi_probability(market),
+        "volume": _to_float(market.get("volume_dollars") or market.get("volume")),
+        "end_date": market.get("close_time") or market.get("expiration_time"),
+        "source": "kalshi",
+    }
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -95,97 +209,128 @@ def _oddpool_headers() -> dict:
 
 @app.get("/markets/polymarket")
 async def search_polymarket(search: str = Query(..., min_length=1)):
-    headers = _oddpool_headers()
+    query = search.strip()
+    seen = set()
+    matches = []
 
-    # Search events (titles) — broader match than searching market questions directly
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{ODDPOOL_BASE}/search/events",
-            params={"q": search, "limit": 20},
-            headers=headers,
-        )
-    if resp.status_code == 429:
-        raise HTTPException(429, "Rate limit — wait a moment and try again")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
-
-    events = resp.json() if isinstance(resp.json(), list) else []
-    poly_events = [e for e in events if e.get("exchange") == "polymarket"][:5]
-
-    seen: set[str] = set()
-    results = []
-
-    for event in poly_events:
-        await asyncio.sleep(1.1)  # Oddpool burst limit: 1 req/sec
-        event_id = event.get("event_id")
-        async with httpx.AsyncClient(timeout=10) as client:
-            mresp = await client.get(
-                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
-                headers=headers,
+        # Gamma "search" query is currently unreliable; fetch liquid open markets then filter ourselves.
+        page_size = 200
+        for offset in range(0, 1000, page_size):
+            resp = await client.get(
+                f"{POLYMARKET_GAMMA}/markets",
+                params={
+                    "closed": False,
+                    "active": True,
+                    "order": "volumeNum",
+                    "ascending": False,
+                    "limit": page_size,
+                    "offset": offset,
+                },
             )
-        if mresp.status_code != 200:
-            continue
-        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
-            mid = m.get("market_id")
-            if mid and mid not in seen:
-                seen.add(mid)
-                results.append({
-                    "id": mid,
-                    "question": m.get("question"),
-                    "price": float(m.get("last_yes_price") or 0),
-                    "volume": m.get("volume"),
-                    "end_date": None,
-                    "source": "polymarket",
-                })
+            if resp.status_code != 200:
+                raise HTTPException(502, f"Polymarket error: {resp.status_code}")
 
-    return results
+            page = resp.json()
+            if not isinstance(page, list) or not page:
+                break
+
+            for m in page:
+                market_id = str(m.get("id"))
+                if not market_id or market_id in seen:
+                    continue
+                seen.add(market_id)
+                text = " ".join(
+                    str(m.get(k, "") or "")
+                    for k in ("question", "slug", "description")
+                )
+                if _matches_query(text, query):
+                    matches.append(_normalize_polymarket_market(m))
+                    if len(matches) >= 10:
+                        return matches
+
+            if len(page) < page_size:
+                break
+
+    return matches
+
+
+@app.get("/markets/polymarket/{market_id}")
+async def get_polymarket_market(market_id: str):
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{POLYMARKET_GAMMA}/markets/{market_id}")
+    if resp.status_code == 404:
+        raise HTTPException(404, "Polymarket market not found")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Polymarket error: {resp.status_code}")
+
+    m = resp.json()
+    return _normalize_polymarket_market(m)
 
 
 @app.get("/markets/kalshi")
 async def search_kalshi(search: str = Query(..., min_length=1)):
-    headers = _oddpool_headers()
+    query = search.strip()
+    headers = {}
+    if KALSHI_API_KEY:
+        headers["Authorization"] = f"Token {KALSHI_API_KEY}"
 
+    all_markets = []
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{ODDPOOL_BASE}/search/events",
-            params={"q": search, "limit": 20},
+            f"{KALSHI_BASE}/markets",
+            params={"limit": 200, "status": "open"},
             headers=headers,
         )
     if resp.status_code == 429:
         raise HTTPException(429, "Rate limit — wait a moment and try again")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Oddpool error: {resp.status_code}")
+        raise HTTPException(502, f"Kalshi error: {resp.status_code}")
+    data = resp.json()
+    all_markets.extend(data.get("markets", []))
 
-    events = resp.json() if isinstance(resp.json(), list) else []
-    kalshi_events = [e for e in events if e.get("exchange") == "kalshi"][:5]
+    # Fallback: some API versions honor search server-side better, so merge those too.
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp_search = await client.get(
+            f"{KALSHI_BASE}/markets",
+            params={"search": search, "limit": 200, "status": "open"},
+            headers=headers,
+        )
+    if resp_search.status_code == 200:
+        all_markets.extend(resp_search.json().get("markets", []))
 
-    seen: set[str] = set()
+    seen = set()
     results = []
-
-    for event in kalshi_events:
-        await asyncio.sleep(1.1)
-        event_id = event.get("event_id")
-        async with httpx.AsyncClient(timeout=10) as client:
-            mresp = await client.get(
-                f"{ODDPOOL_BASE}/search/events/{event_id}/markets",
-                headers=headers,
-            )
-        if mresp.status_code != 200:
+    for m in all_markets:
+        market_id = m.get("ticker")
+        if not market_id or market_id in seen:
             continue
-        for m in (mresp.json() if isinstance(mresp.json(), list) else []):
-            mid = m.get("market_id")
-            if mid and mid not in seen:
-                seen.add(mid)
-                results.append({
-                    "id": mid,
-                    "question": m.get("question"),
-                    "price": float(m.get("last_yes_price") or 0),
-                    "volume": m.get("volume"),
-                    "end_date": None,
-                    "source": "kalshi",
-                })
-
+        seen.add(market_id)
+        text = " ".join(
+            str(m.get(k, "") or "")
+            for k in ("title", "yes_sub_title", "no_sub_title", "subtitle")
+        )
+        if _matches_query(text, query):
+            results.append(_normalize_kalshi_market(m))
+            if len(results) >= 10:
+                break
     return results
+
+
+@app.get("/markets/kalshi/{ticker}")
+async def get_kalshi_market(ticker: str):
+    headers = {}
+    if KALSHI_API_KEY:
+        headers["Authorization"] = f"Token {KALSHI_API_KEY}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{KALSHI_BASE}/markets/{ticker}", headers=headers)
+    if resp.status_code == 404:
+        raise HTTPException(404, "Kalshi market not found")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Kalshi error: {resp.status_code}")
+
+    m = resp.json().get("market", {})
+    return _normalize_kalshi_market(m)
 
 
 @app.get("/bl-comparison")

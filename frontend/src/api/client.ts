@@ -47,6 +47,12 @@ export const searchPolymarket = (search: string) =>
 export const searchKalshi = (search: string) =>
   api.get<Market[]>('/markets/kalshi', { params: { search } }).then((r) => r.data);
 
+export const getPolymarketMarket = (marketId: string) =>
+  api.get<Market>(`/markets/polymarket/${marketId}`).then((r) => r.data);
+
+export const getKalshiMarket = (ticker: string) =>
+  api.get<Market>(`/markets/kalshi/${ticker}`).then((r) => r.data);
+
 export interface RndPoint {
   strike: number;
   density: number;
