@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
   HedgeRecommendation,
-  BLSignalOut,
   FailedHedgeCandidate,
 } from '../api/client';
 import { PortfolioPosition } from './PortfolioInputPage';
@@ -63,69 +62,6 @@ function correlationColor(r: number) {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
-function BLSignalCard({ signal }: { signal: BLSignalOut }) {
-  const isUnder = signal.bl_direction === 'pm_underpriced';
-  const confPct = Math.round(signal.bl_confidence * 100);
-
-  return (
-    <div className="bg-gray-900 rounded-xl border border-indigo-800 p-5 mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-indigo-300 uppercase tracking-wider">
-          Breeden-Litzenberger Options Signal
-        </h3>
-        <span className={`text-xs px-2 py-0.5 rounded border ${
-          signal.bl_confidence >= 0.6
-            ? 'bg-green-900 text-green-300 border-green-700'
-            : signal.bl_confidence >= 0.35
-            ? 'bg-yellow-900 text-yellow-300 border-yellow-700'
-            : 'bg-gray-800 text-gray-400 border-gray-600'
-        }`}>
-          BL confidence: {confPct}%
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Deribit-implied P</p>
-          <p className="text-xl font-bold text-white">{fmtPct(signal.bl_prob)}</p>
-        </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Divergence vs PM</p>
-          <p className={`text-xl font-bold ${isUnder ? 'text-green-400' : 'text-red-400'}`}>
-            {fmtPp(signal.bl_divergence)}
-          </p>
-        </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">BTC Spot</p>
-          <p className="text-xl font-bold text-white">
-            {signal.spot != null ? `$${signal.spot.toLocaleString()}` : '—'}
-          </p>
-        </div>
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Strikes used</p>
-          <p className="text-xl font-bold text-white">{signal.strikes_used}</p>
-          {signal.strike_range.length === 2 && (
-            <p className="text-xs text-gray-500 mt-0.5">
-              ${signal.strike_range[0].toLocaleString()}–${signal.strike_range[1].toLocaleString()}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <p className={`text-xs mt-3 ${isUnder ? 'text-green-300' : 'text-red-300'}`}>
-        {isUnder
-          ? 'Deribit options traders think this event is MORE likely than Polymarket prices — hedge sizing reduced.'
-          : 'Deribit options traders think this event is LESS likely than Polymarket prices — hedge sizing increased.'}
-      </p>
-
-      {signal.bl_confidence < 0.35 && (
-        <p className="text-xs text-yellow-400 mt-1">
-          Low BL confidence — options data may be thin at this strike/expiry. Signal not applied to hedge ratios.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function RecommendationCard({ rec, index }: { rec: HedgeRecommendation; index: number }) {
   const [expanded, setExpanded] = useState(false);
