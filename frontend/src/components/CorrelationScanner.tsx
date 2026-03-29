@@ -37,6 +37,25 @@ const DEMO_MARKET: Market = {
 
 const DEMO_RESULTS: ScanResult[] = [
   {
+    market_id: 'demo-iran-regime-jun30',
+    question: 'Will the Iranian regime fall by June 30?',
+    last_price: 0.08,
+    composite_score: 0.91,
+    full_pearson: 0.897,
+    full_pearson_returns: 0.871,
+    best_lag_days: 1,
+    lead_direction: 'sync',
+    shared_history_days: 298,
+    n_observations: 298,
+    rolling_mean: 0.89,
+    rolling_std: 0.031,
+    break_detected: false,
+    granger_dominant_direction: null,
+    semantic_similarity: 0.96,
+    end_date_proximity: 0.22,
+    resolution_convergence: true,
+  },
+  {
     market_id: 'demo-1',
     question: 'Will Iran experience major civil unrest or uprising in 2025?',
     last_price: 0.44,

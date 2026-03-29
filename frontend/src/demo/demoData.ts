@@ -25,29 +25,29 @@ export const DEMO_MARKET_A: Market = {
 };
 
 export const DEMO_MARKET_B: Market = {
-  id: 'demo-iran-civil-unrest',
-  question: 'Will Iran experience major civil unrest or uprising in 2025?',
-  price: 0.44,
-  volume: 3800000,
-  end_date: '2025-12-31T00:00:00Z',
+  id: 'demo-iran-regime-jun30',
+  question: 'Will the Iranian regime fall by June 30?',
+  price: 0.08,
+  volume: 1900000,
+  end_date: '2025-06-30T00:00:00Z',
   source: 'polymarket',
 };
 
 export const DEMO_RECOMMENDATIONS: HedgeRecommendation[] = [
   {
-    candidate_market_id: 'demo-iran-civil-unrest',
-    question: 'Will Iran experience major civil unrest or uprising in 2025?',
-    current_price: 0.44,
+    candidate_market_id: 'demo-iran-regime-jun30',
+    question: 'Will the Iranian regime fall by June 30?',
+    current_price: 0.08,
     platform: 'polymarket',
     hedge_direction: 'YES',
-    hedge_ratio: 0.31,
-    recommended_size: 96,
-    correlation: 0.861,
-    full_pearson: 0.844,
-    rolling_std: 0.039,
-    lead_direction: 'B_leads_A',
-    shared_history_days: 328,
-    n_observations: 328,
+    hedge_ratio: 0.14,
+    recommended_size: 68,
+    correlation: 0.913,
+    full_pearson: 0.897,
+    rolling_std: 0.031,
+    lead_direction: 'sync',
+    shared_history_days: 298,
+    n_observations: 298,
     composite_score: 0.83,
     bl_divergence: 0.11,
     bl_confidence: 0.76,
@@ -176,46 +176,46 @@ export const DEMO_FAILED_CANDIDATES: FailedHedgeCandidate[] = [
   },
 ];
 
-// ── Demo correlation (MarketCompare: regime fall vs civil unrest) ─────────────
+// ── Demo correlation (MarketCompare: regime fall 2027 vs regime fall Jun 30) ──
 
 export const DEMO_CORRELATION: CorrelationResult = {
   market_a: 'demo-iran-regime-fall',
-  market_b: 'demo-iran-civil-unrest',
-  shared_history_days: 328,
-  n_observations: 328,
-  full_pearson: 0.844,
-  full_pearson_returns: 0.809,
-  rolling_mean: 0.83,
-  rolling_std: 0.039,
-  rolling_pct_positive: 0.89,
+  market_b: 'demo-iran-regime-jun30',
+  shared_history_days: 298,
+  n_observations: 298,
+  full_pearson: 0.897,
+  full_pearson_returns: 0.871,
+  rolling_mean: 0.89,
+  rolling_std: 0.031,
+  rolling_pct_positive: 0.94,
   rolling_series: Array.from({ length: 60 }, (_, i) => ({
     t: Math.floor(Date.now() / 1000) - (60 - i) * 86400 * 5,
-    r: parseFloat((0.83 + 0.05 * Math.sin(i / 7) + (i > 50 ? 0.03 : 0)).toFixed(4)),
+    r: parseFloat((0.89 + 0.04 * Math.sin(i / 8) + (i > 52 ? 0.02 : 0)).toFixed(4)),
   })),
   break_detected: false,
-  cusum_pval: 0.22,
+  cusum_pval: 0.31,
   pre_break_pearson: null,
   post_break_pearson: null,
-  best_lag_days: 2,
-  lag_correlation: 0.871,
-  lead_direction: 'B_leads_A',
+  best_lag_days: 1,
+  lag_correlation: 0.908,
+  lead_direction: 'sync',
   lag_series: Array.from({ length: 11 }, (_, i) => ({
     lag: i - 5,
-    r: parseFloat((0.844 * Math.exp(-0.07 * (i - 7) ** 2)).toFixed(4)),
+    r: parseFloat((0.897 * Math.exp(-0.04 * (i - 5) ** 2)).toFixed(4)),
   })),
-  a_causes_b_pval: 0.204,
-  b_causes_a_pval: 0.018,
-  granger_dominant_direction: 'B_causes_A',
+  a_causes_b_pval: 0.038,
+  b_causes_a_pval: 0.041,
+  granger_dominant_direction: null,
   low_volume_warning: false,
   short_history_warning: false,
-  resolution_convergence: false,
-  semantic_similarity: 0.79,
-  end_date_proximity: 0.54,
-  composite_score: 0.83,
+  resolution_convergence: true,
+  semantic_similarity: 0.96,
+  end_date_proximity: 0.22,
+  composite_score: 0.91,
 };
 
 // ── Demo backtest data ────────────────────────────────────────────────────────
-// Position: Iran regime fall YES @18¢ $500 | Hedge: civil unrest YES @44¢ $96
+// Position: Iran regime fall YES @18¢ $500 | Hedge: regime fall Jun 30 YES @8¢ $68
 // Regime YES profit = 500 × (1/0.18 − 1) = $2,277.78
 // Regime NO  loss   = −$500
 // Unrest YES profit = 96 × (1/0.44 − 1) = $122.18
@@ -375,7 +375,7 @@ export function generateDemoBacktestData(): BacktestResponse {
     },
     meta: {
       n_shared_days: 328, n_returns: 327, warnings: [],
-      market_a_id: 'demo-iran-regime-fall', market_b_id: 'demo-iran-civil-unrest',
+      market_a_id: 'demo-iran-regime-fall', market_b_id: 'demo-iran-regime-jun30',
     },
   };
 }
