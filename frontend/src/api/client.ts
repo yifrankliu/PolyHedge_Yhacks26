@@ -68,6 +68,11 @@ export const lookupPolymarketBySlug = (slug: string) =>
 export const getPolymarketHistory = (marketId: string, interval = '1m') =>
   api.get<MarketHistory>(`/markets/polymarket/${marketId}/history`, { params: { interval } }).then(r => r.data);
 
+export interface VolumePoint { t: number; v: number; }
+
+export const getPolymarketVolumeHistory = (marketId: string) =>
+  api.get<VolumePoint[]>(`/markets/polymarket/${marketId}/volume-history`).then(r => r.data);
+
 export interface RollingPoint { t: number; r: number; }
 export interface LagPoint    { lag: number; r: number; }
 
@@ -200,3 +205,51 @@ export interface HedgeResponse {
 
 export const scanHedges = (req: HedgeRequest) =>
   api.post<HedgeResponse>('/hedge', req).then((r) => r.data);
+
+// ── Logical Correlation (LLM-powered) ──────────────────────────────────────────
+
+export type LogicalRelationshipType =
+  | 'causal'
+  | 'shared_driver'
+  | 'thematic'
+  | 'inverse'
+  | 'coincidental'
+  | 'none';
+
+export interface LogicalCorrelation {
+  logical_score: number;            // 0.0–1.0
+  relationship_type: LogicalRelationshipType;
+  explanation: string;              // 1–2 sentences
+}
+
+export const analyzeLogicalCorrelation = (params: {
+  market_a_question: string;
+  market_b_question: string;
+  pearson_r: number;
+  semantic_similarity: number;
+}) =>
+  api
+    .post<LogicalCorrelation>('/markets/logical-correlation', params)
+    .then((r) => r.data);
+
+// ── Spike Investigation ────────────────────────────────────────────────────────
+
+export interface SpikeInvestigationResponse {
+  date: string;
+  price: number;
+  events: string[];
+  explanation: string;
+  confidence: 'high' | 'medium' | 'low';
+  search_query?: string;
+  raw_context?: string;
+}
+
+export const investigateSpike = (params: {
+  question: string;
+  spike_timestamp: number;
+  spike_price: number;
+  market_id?: string;
+}) =>
+  api
+    .post<SpikeInvestigationResponse>('/markets/spike-investigation', params)
+    .then((r) => r.data);

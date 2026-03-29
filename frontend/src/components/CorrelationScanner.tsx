@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Market } from '../api/client';
+import { Market, LogicalCorrelation, analyzeLogicalCorrelation } from '../api/client';
 import MarketSearchWidget from './MarketSearchWidget';
 
 const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -75,6 +75,8 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
   const [found, setFound] = useState(0);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [error, setError] = useState('');
+  const [logicMap, setLogicMap] = useState<Record<string, LogicalCorrelation>>({});
+  const [logicLoading, setLogicLoading] = useState<Record<string, boolean>>({});
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -138,6 +140,36 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
   const stopScan = () => {
     esRef.current?.close();
     setScanning(false);
+  };
+
+  const analyzeLogic = async (r: ScanResult) => {
+    if (!selectedMarket) return;
+    setLogicLoading(prev => ({ ...prev, [r.market_id]: true }));
+    try {
+      const res = await analyzeLogicalCorrelation({
+        market_a_question: selectedMarket.question,
+        market_b_question: r.question,
+        pearson_r: r.full_pearson,
+        semantic_similarity: r.semantic_similarity,
+      });
+      setLogicMap(prev => ({ ...prev, [r.market_id]: res }));
+    } catch {
+      setLogicMap(prev => ({
+        ...prev,
+        [r.market_id]: { logical_score: 0, relationship_type: 'none', explanation: 'Analysis failed.' },
+      }));
+    } finally {
+      setLogicLoading(prev => ({ ...prev, [r.market_id]: false }));
+    }
+  };
+
+  const LOGIC_COLORS: Record<string, string> = {
+    causal: '#34d399', shared_driver: '#818cf8', thematic: '#a78bfa',
+    inverse: '#f87171', coincidental: '#9ca3af', none: '#6b7280',
+  };
+  const LOGIC_LABELS: Record<string, string> = {
+    causal: 'Causal', shared_driver: 'Shared Driver', thematic: 'Thematic',
+    inverse: 'Inverse', coincidental: 'Coincidental', none: '—',
   };
 
   const progressPct = total > 0 ? Math.round((scanned / total) * 100) : 0;
@@ -217,6 +249,10 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                   <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Composite</th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Pearson r</th>
                   <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Semantic</th>
+                  <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">
+                    Logic
+                    <span className="ml-1 text-[9px] bg-indigo-900 text-indigo-300 px-1 py-0.5 rounded">AI</span>
+                  </th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Lead/Lag</th>
                   <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Days</th>
                   <th className="px-3 py-2.5 w-16"></th>
@@ -244,6 +280,50 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
                     </td>
                     <td className="px-3 py-3">
                       {semanticBar(r.semantic_similarity ?? 0)}
+                    </td>
+                    <td className="px-3 py-3 min-w-[120px]">
+                      {logicLoading[r.market_id] ? (
+                        <span className="text-xs text-indigo-400 animate-pulse">Analyzing…</span>
+                      ) : logicMap[r.market_id] ? (
+                        <div className="group relative">
+                          <div className="flex items-center gap-1.5">
+                            {/* Score bar */}
+                            <div className="w-10 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${Math.round(logicMap[r.market_id].logical_score * 100)}%`,
+                                  backgroundColor: LOGIC_COLORS[logicMap[r.market_id].relationship_type] ?? '#6b7280',
+                                }}
+                              />
+                            </div>
+                            {/* Type badge */}
+                            <span
+                              className="text-[10px] font-medium"
+                              style={{ color: LOGIC_COLORS[logicMap[r.market_id].relationship_type] ?? '#6b7280' }}
+                            >
+                              {LOGIC_LABELS[logicMap[r.market_id].relationship_type] ?? '—'}
+                            </span>
+                          </div>
+                          {/* Hover tooltip with explanation */}
+                          <div className="hidden group-hover:block absolute z-20 left-0 bottom-full mb-1 w-64 bg-gray-800 border border-gray-600 rounded-lg p-2.5 shadow-xl">
+                            <p className="text-[10px] text-indigo-300 font-medium mb-1">
+                              Logical score: {logicMap[r.market_id].logical_score.toFixed(2)}
+                            </p>
+                            <p className="text-xs text-gray-300 leading-snug">
+                              {logicMap[r.market_id].explanation}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => analyzeLogic(r)}
+                          className="text-[10px] text-indigo-400 hover:text-indigo-300 underline underline-offset-2 transition-colors"
+                          title="Ask Claude Haiku to assess logical relationship"
+                        >
+                          Analyze
+                        </button>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-right text-xs text-gray-400">
                       {lagLabel(r.best_lag_days, r.lead_direction)}
