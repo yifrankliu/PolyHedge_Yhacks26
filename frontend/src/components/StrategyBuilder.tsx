@@ -11,7 +11,6 @@ import {
 } from 'recharts';
 import { HedgeRecommendation } from '../api/client';
 import { PortfolioPosition } from './PortfolioInputPage';
-import BacktestPanel from './BacktestPanel';
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 const PALETTE = [
@@ -122,9 +121,10 @@ function ChartTooltip({ active, payload, label }: any) {
 interface Props {
   positions: PortfolioPosition[];
   recommendations: HedgeRecommendation[];
+  onTestStrategy?: (pos: PortfolioPosition, hedge: HedgeRecommendation) => void;
 }
 
-export default function StrategyBuilder({ positions, recommendations }: Props) {
+export default function StrategyBuilder({ positions, recommendations, onTestStrategy }: Props) {
   const pos = positions[0] ?? null;
 
   const [strategies, setStrategies] = useState<Strategy[]>([
@@ -662,10 +662,10 @@ export default function StrategyBuilder({ positions, recommendations }: Props) {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-                Monte Carlo Stress Test
+                Stress Test
               </h3>
               <p className="text-[10px] text-zinc-600 mt-0.5">
-                Select a hedge from {activeStrategy.label} to run a full backtest
+                Select a hedge to stress-test, then open the testing dashboard
               </p>
             </div>
           </div>
@@ -693,21 +693,16 @@ export default function StrategyBuilder({ positions, recommendations }: Props) {
             })}
           </div>
 
-          {/* BacktestPanel */}
           {backtestHedgeId && (() => {
-            const h = activeStrategy.hedges.find(h => h.candidate_market_id === backtestHedgeId);
+            const h = activeStrategy.hedges.find(hh => hh.candidate_market_id === backtestHedgeId);
             if (!h) return null;
             return (
-              <BacktestPanel
-                marketAId={pos.market_id}
-                marketBId={h.candidate_market_id}
-                direction={pos.side}
-                entryPrice={pos.entry_price_cents / 100}
-                positionSize={pos.stake_usd}
-                hedgeDirection={h.hedge_direction}
-                hedgeSize={h.recommended_size}
-                questionB={h.question}
-              />
+              <button
+                onClick={() => onTestStrategy?.(pos, h)}
+                className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Test Strategy →
+              </button>
             );
           })()}
         </div>

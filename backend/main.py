@@ -1749,17 +1749,17 @@ async def run_backtest(req: BacktestRequest):
 
     # ── Fetch histories concurrently ──────────────────────────────────────────
     hist_a_res, hist_b_res = await asyncio.gather(
-        fetch_clob_history_cached(req.market_a_id),
-        fetch_clob_history_cached(req.market_b_id),
+        _fetch_clob_history(req.market_a_id),
+        _fetch_clob_history(req.market_b_id),
         return_exceptions=True,
     )
-    if isinstance(hist_a_res, Exception) or hist_a_res is None:
-        raise HTTPException(404, f"Could not fetch history for market A: {req.market_a_id}")
-    if isinstance(hist_b_res, Exception) or hist_b_res is None:
-        raise HTTPException(404, f"Could not fetch history for market B: {req.market_b_id}")
+    if isinstance(hist_a_res, Exception):
+        raise HTTPException(404, f"Could not fetch history for market A ({req.market_a_id}): {hist_a_res}")
+    if isinstance(hist_b_res, Exception):
+        raise HTTPException(404, f"Could not fetch history for market B ({req.market_b_id}): {hist_b_res}")
 
-    _, hist_a = hist_a_res
-    _, hist_b = hist_b_res
+    hist_a: list = hist_a_res  # type: ignore[assignment]
+    hist_b: list = hist_b_res  # type: ignore[assignment]
 
     # ── Align and compute returns ──────────────────────────────────────────────
     sa, sb = align_series(hist_a, hist_b)
@@ -1799,7 +1799,7 @@ async def run_backtest(req: BacktestRequest):
         "scenario_replay": scen,
         "walk_forward": wf,
         "meta": {
-            "n_shared_days": len(sa),
+            "n_shared_days": int(len(sa)),
             "n_returns": int(len(ra)),
             "warnings": warnings,
             "market_a_id": req.market_a_id,

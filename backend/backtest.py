@@ -128,8 +128,8 @@ def bootstrap_simulation(
         density_z.append((np.sum(in_bin, axis=0) / n_sim).round(5).tolist())
 
     return {
-        "n_sim": n_sim,
-        "horizon_days": T,
+        "n_sim": int(n_sim),
+        "horizon_days": int(T),
         "fan": fan,
         "fan_unhedged": fan_unhedged,
         "sample_paths": sample_paths,
@@ -172,7 +172,7 @@ def scenario_replay(
         net   = pos + hedge
         eff   = float(np.clip(1.0 - abs(net) / (abs(pos) + 1e-8), -2, 2))
         return {
-            "day": i,
+            "day": int(i),
             "da": round(float(ra[i]), 5),
             "db": round(float(rb[i]), 5),
             "pos_pnl": round(pos, 4),
@@ -271,5 +271,5 @@ def walk_forward_oos(
         "unhedged_cum": [round(v, 4) for v in unhedged_cum],
         "rolling_beta": betas,
         "oos_variance_reduction": round(var_red, 4),
-        "n_oos_points": N - min_train,
+        "n_oos_points": int(N - min_train),
     }

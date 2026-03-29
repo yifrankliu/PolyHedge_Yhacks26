@@ -5,6 +5,7 @@ import { Market, HedgeRecommendation } from './api/client';
 import PortfolioInputPage, { PortfolioPosition } from './components/PortfolioInputPage';
 import HedgeScanner from './components/HedgeScanner';
 import StrategyBuilder from './components/StrategyBuilder';
+import StressTestDashboard from './components/StressTestDashboard';
 
 const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'portfolio', label: 'Position Input' },
@@ -12,6 +13,7 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
   { id: 'compare', label: 'Market Comparator' },
   { id: 'hedge', label: 'Hedge Scanner' },
   { id: 'strategy', label: 'Strategy Builder' },
+  { id: 'stress', label: 'Stress Test' },
 ];
 
 
@@ -20,6 +22,7 @@ export default function App() {
   const [hedgePositions, setHedgePositions] = useState<PortfolioPosition[]>([]);
   const [hedgeRecommendations, setHedgeRecommendations] = useState<HedgeRecommendation[]>([]);
   const [strategyPositions, setStrategyPositions] = useState<PortfolioPosition[]>([]);
+  const [stressTarget, setStressTarget] = useState<{ position: PortfolioPosition; hedge: HedgeRecommendation } | null>(null);
   const [pendingMarketA, setPendingMarketA] = useState<Market | null>(null);
   const [pendingMarketB, setPendingMarketB] = useState<Market | null>(null);
 
@@ -38,6 +41,11 @@ export default function App() {
   const handleRecommendationsUpdate = (recs: HedgeRecommendation[], pos: PortfolioPosition) => {
     setHedgeRecommendations(recs);
     setStrategyPositions(prev => (prev.length ? prev : [pos]));
+  };
+
+  const handleTestStrategy = (pos: PortfolioPosition, hedge: HedgeRecommendation) => {
+    setStressTarget({ position: pos, hedge });
+    setActiveTab('stress');
   };
 
   return (
@@ -111,6 +119,13 @@ export default function App() {
           <StrategyBuilder
             positions={strategyPositions}
             recommendations={hedgeRecommendations}
+            onTestStrategy={handleTestStrategy}
+          />
+        </div>
+        <div style={{ display: activeTab === 'stress' ? 'block' : 'none' }}>
+          <StressTestDashboard
+            position={stressTarget?.position ?? null}
+            hedge={stressTarget?.hedge ?? null}
           />
         </div>
       </main>

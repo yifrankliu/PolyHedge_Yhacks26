@@ -155,7 +155,11 @@ export default function BacktestPanel({
       n_sim: 2000,
     })
       .then(setResult)
-      .catch(e => setError(e?.response?.data?.detail ?? 'Stress test failed'))
+      .catch(e => {
+        const detail = e?.response?.data?.detail ?? e?.message ?? 'Stress test failed';
+        console.error('[BacktestPanel]', e?.response?.status, detail, e);
+        setError(detail);
+      })
       .finally(() => setLoading(false));
   }, [marketAId, marketBId, direction, entryPrice, positionSize, hedgeDirection, hedgeSize]);
 
