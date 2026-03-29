@@ -4,9 +4,8 @@ import {
   getPolymarketHistory,
   getKalshiMarket,
   getPolymarketMarket,
-  searchKalshi,
-  searchPolymarket,
 } from '../api/client';
+import MarketSearchWidget from './MarketSearchWidget';
 import {
   CartesianGrid,
   Line,
@@ -35,97 +34,6 @@ export type PortfolioPosition = {
 };
 
 type Position = PortfolioPosition;
-
-function MarketLookup({
-  title,
-  hint,
-  onSelect,
-}: {
-  title: string;
-  hint: string;
-  onSelect: (market: Market, source: Source) => void;
-}) {
-  const [source, setSource] = useState<Source>('polymarket');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const runSearch = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const fn = source === 'polymarket' ? searchPolymarket : searchKalshi;
-      const data = await fn(query.trim());
-      setResults(data.slice(0, 8));
-      if (!data.length) {
-        setError('No markets found for that query.');
-      }
-    } catch {
-      setError('Unable to search markets right now.');
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-      <p className="text-sm font-semibold text-gray-200">{title}</p>
-      <p className="text-xs text-gray-500 mt-1 mb-3">{hint}</p>
-
-      <div className="flex gap-2">
-        <select
-          value={source}
-          onChange={(e) => setSource(e.target.value as Source)}
-          className="bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600"
-        >
-          <option value="polymarket">Polymarket</option>
-          <option value="kalshi">Kalshi</option>
-        </select>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-          placeholder="Search market by keyword..."
-          className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
-        />
-        <button
-          onClick={runSearch}
-          disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-        >
-          {loading ? '...' : 'Search'}
-        </button>
-      </div>
-
-      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
-
-      {results.length > 0 && (
-        <div className="mt-3 bg-gray-800 rounded-lg border border-gray-700 max-h-56 overflow-y-auto">
-          {results.map((market) => (
-            <button
-              key={market.id}
-              onClick={() => {
-                onSelect(market, source);
-                setResults([]);
-                setQuery(market.question);
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
-            >
-              <p className="text-sm text-white truncate">{market.question}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {market.price != null ? `${(market.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-                {market.end_date ? new Date(market.end_date).toLocaleDateString() : 'no date'}
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const calcMaxProfit = (entryPriceCents: number, stakeUsd: number) => {
   const p = entryPriceCents / 100;
@@ -342,10 +250,21 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
             </div>
 
             {positionInputMode === 'search' ? (
-              <MarketLookup
-                title="Find Position Market"
-                hint="Search and select the exact market for this position."
-                onSelect={(market, source) => applySelectedMarket(market, source)}
+              <MarketSearchWidget
+                label="Find Position Market"
+                selected={positionMarket ? {
+                  id: positionMarket.market_id,
+                  question: positionMarket.question,
+                  price: positionMarket.market_price_cents != null ? positionMarket.market_price_cents / 100 : null,
+                  volume: null,
+                  end_date: null,
+                  source: positionMarket.source,
+                } : null}
+                onSelect={(m) => {
+                  if (!m.id) { setPositionMarket(null); return; }
+                  applySelectedMarket(m, m.source as Source);
+                }}
+                placeholder="Search or paste a Polymarket URL..."
               />
             ) : (
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-3">
@@ -386,7 +305,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               </div>
             )}
 
-            {positionMarket ? (
+            {positionInputMode === 'manual_id' && (positionMarket ? (
               <div className="text-xs bg-gray-800 border border-gray-600 rounded p-2 text-gray-300 flex justify-between items-center gap-3">
                 <div>
                   Selected market: <span className="text-white">{positionMarket.question}</span>
@@ -403,7 +322,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded p-2">
                 Choose a market first. Position details appear afterward.
               </p>
-            )}
+            ))}
 
             {positionMarket && (
               <>
