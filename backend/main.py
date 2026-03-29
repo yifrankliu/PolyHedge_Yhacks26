@@ -603,9 +603,19 @@ class BLSignalOut(BaseModel):
     strike_range: list
 
 
+class FailedHedgeCandidate(BaseModel):
+    candidate_market_id: str
+    question: str
+    platform: str
+    current_price: float
+    fail_reason: str
+    shared_history_days: Optional[int]
+
+
 class HedgeResponse(BaseModel):
     position_market_id: str
     recommendations: list
+    failed_candidates: list
     bl_signal: Optional[BLSignalOut]
     errors: dict
 
@@ -1376,16 +1386,41 @@ async def hedge_scanner(req: HedgeRequest):
 
     # ── Step 5: Correlate each candidate and compute hedge stats ───────────────
     recommendations: list[HedgeRecommendation] = []
+    failed_candidates: list[FailedHedgeCandidate] = []
 
     for candidate, hist in zip(candidates, hist_results):
         if isinstance(hist, Exception):
+            failed_candidates.append(FailedHedgeCandidate(
+                candidate_market_id=candidate["id"],
+                question=candidate["question"],
+                platform="polymarket",
+                current_price=candidate["price"],
+                fail_reason="Failed to fetch price history",
+                shared_history_days=None,
+            ))
             continue
         corr = correlate(req.market_id, candidate["id"], user_history, hist)
         if corr is None or corr.get("error"):
+            failed_candidates.append(FailedHedgeCandidate(
+                candidate_market_id=candidate["id"],
+                question=candidate["question"],
+                platform="polymarket",
+                current_price=candidate["price"],
+                fail_reason=corr.get("error", "Correlation failed") if corr else "Correlation failed",
+                shared_history_days=None,
+            ))
             continue
 
         rigorous = rigorous_event_hedge(user_history, hist)
         if rigorous.get("error"):
+            failed_candidates.append(FailedHedgeCandidate(
+                candidate_market_id=candidate["id"],
+                question=candidate["question"],
+                platform="polymarket",
+                current_price=candidate["price"],
+                fail_reason=rigorous["error"],
+                shared_history_days=rigorous.get("n_shared_days"),
+            ))
             continue
 
         raw_ratio = rigorous["hedge_ratio"]
@@ -1434,9 +1469,13 @@ async def hedge_scanner(req: HedgeRequest):
 
     recommendations.sort(key=lambda x: -x.hedge_confidence)
 
+    # Sort failed candidates: those with some shared history first, then by question length as tiebreak
+    failed_candidates.sort(key=lambda x: -(x.shared_history_days or 0))
+
     return HedgeResponse(
         position_market_id=req.market_id,
         recommendations=recommendations,
+        failed_candidates=failed_candidates[:8],
         bl_signal=bl_signal_out,
         errors=errors,
     )

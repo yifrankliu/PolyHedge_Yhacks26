@@ -173,6 +173,7 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
   const [graphError, setGraphError] = useState('');
   const [graphSeries, setGraphSeries] = useState<Array<{ t: number; p: number }>>([]);
   const [graphCurrentPrice, setGraphCurrentPrice] = useState<number | null>(null);
+  const [graphNormalized, setGraphNormalized] = useState(false);
 
   const liveEntryPriceCents = useMemo(() => {
     if (!positionMarket || positionMarket.market_price_cents == null) return null;
@@ -659,6 +660,16 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
                     <option value="1w">1w</option>
                     <option value="max">max</option>
                   </select>
+                  <button
+                    onClick={() => setGraphNormalized((n) => !n)}
+                    className={`px-2 py-1.5 rounded text-xs border transition-colors ${
+                      graphNormalized
+                        ? 'bg-indigo-700 text-white border-indigo-500'
+                        : 'bg-gray-800 text-gray-400 border-gray-600 hover:text-gray-200'
+                    }`}
+                  >
+                    Δ Norm
+                  </button>
                 </div>
               )}
             </div>
@@ -675,39 +686,56 @@ export default function PortfolioInputPage({ onScanHedges }: { onScanHedges?: (p
               <p className="text-sm text-gray-500">No history data available for this market.</p>
             ) : (
               <>
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={graphSeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis
-                      dataKey="t"
-                      tickFormatter={formatTime}
-                      stroke="#6b7280"
-                      tick={{ fill: '#9ca3af', fontSize: 10 }}
-                    />
-                    <YAxis
-                      domain={[0, 100]}
-                      tickFormatter={(v) => `${Number(v).toFixed(0)}¢`}
-                      stroke="#6b7280"
-                      tick={{ fill: '#9ca3af', fontSize: 10 }}
-                    />
-                    <Tooltip
-                      formatter={(value: any) => [`${Number(value).toFixed(2)}¢`, 'YES price']}
-                      labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
-                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
-                      labelStyle={{ color: '#9ca3af' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="p"
-                      stroke="#818cf8"
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {(() => {
+                  const baseline = graphNormalized && graphSeries.length > 0 ? graphSeries[0].p : 0;
+                  const displaySeries = graphNormalized
+                    ? graphSeries.map((pt) => ({ t: pt.t, p: pt.p - baseline }))
+                    : graphSeries;
+                  return (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={displaySeries} margin={{ top: 5, right: 15, bottom: 5, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                        <XAxis
+                          dataKey="t"
+                          tickFormatter={formatTime}
+                          stroke="#6b7280"
+                          tick={{ fill: '#9ca3af', fontSize: 10 }}
+                        />
+                        <YAxis
+                          domain={graphNormalized ? ['auto', 'auto'] : [0, 100]}
+                          tickFormatter={(v) => graphNormalized ? `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(0)}¢` : `${Number(v).toFixed(0)}¢`}
+                          stroke="#6b7280"
+                          tick={{ fill: '#9ca3af', fontSize: 10 }}
+                        />
+                        <Tooltip
+                          formatter={(value: any) =>
+                            graphNormalized
+                              ? [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}¢`, 'Δ YES price']
+                              : [`${Number(value).toFixed(2)}¢`, 'YES price']
+                          }
+                          labelFormatter={(label) => new Date(toMillis(Number(label))).toLocaleString()}
+                          contentStyle={{ backgroundColor: '#111827', border: '1px solid #4b5563', borderRadius: 8 }}
+                          labelStyle={{ color: '#9ca3af' }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="p"
+                          stroke="#818cf8"
+                          strokeWidth={2}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
                 <p className="text-xs text-gray-500 mt-2">
                   Current YES price: {graphCurrentPrice != null ? `${graphCurrentPrice.toFixed(2)}¢` : 'N/A'}
+                  {graphNormalized && graphSeries.length > 0 && (
+                    <span className="ml-2 text-indigo-400">
+                      (normalized from {graphSeries[0].p.toFixed(2)}¢)
+                    </span>
+                  )}
                 </p>
               </>
             )}

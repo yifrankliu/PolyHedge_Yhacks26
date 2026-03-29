@@ -191,9 +191,19 @@ export interface BLSignalOut {
   strike_range: number[];
 }
 
+export interface FailedHedgeCandidate {
+  candidate_market_id: string;
+  question: string;
+  platform: string;
+  current_price: number;
+  fail_reason: string;
+  shared_history_days: number | null;
+}
+
 export interface HedgeResponse {
   position_market_id: string;
   recommendations: HedgeRecommendation[];
+  failed_candidates: FailedHedgeCandidate[];
   bl_signal: BLSignalOut | null;
   errors: Record<string, string>;
 }

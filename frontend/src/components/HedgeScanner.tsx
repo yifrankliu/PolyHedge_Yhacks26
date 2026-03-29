@@ -5,6 +5,7 @@ import {
   HedgeResponse,
   HedgeRecommendation,
   BLSignalOut,
+  FailedHedgeCandidate,
 } from '../api/client';
 import { PortfolioPosition } from './PortfolioInputPage';
 
@@ -224,6 +225,43 @@ function RecommendationCard({ rec, index }: { rec: HedgeRecommendation; index: n
   );
 }
 
+function FailedCandidatesBlock({ failed }: { failed: FailedHedgeCandidate[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (failed.length === 0) return null;
+
+  return (
+    <div className="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-gray-800 transition-colors"
+      >
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          {failed.length} considered but excluded
+        </span>
+        <span className="text-xs text-gray-600">{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded && (
+        <div className="divide-y divide-gray-800">
+          {failed.map((c) => (
+            <div key={c.candidate_market_id} className="px-5 py-3 flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-gray-300 leading-snug">{c.question}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {c.platform} · {fmtPct(c.current_price)}
+                  {c.shared_history_days != null && ` · ${c.shared_history_days}d shared history`}
+                </p>
+              </div>
+              <span className="flex-shrink-0 text-xs text-red-400 bg-red-900/30 border border-red-800 rounded px-2 py-1 max-w-[180px] text-right">
+                {c.fail_reason}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function HedgeScanner({ initialPositions = [] }: { initialPositions?: PortfolioPosition[] }) {
@@ -330,8 +368,8 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
                 {result.bl_signal && <BLSignalCard signal={result.bl_signal} />}
 
                 {result.recommendations.length === 0 ? (
-                  <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
-                    <p className="text-gray-500 text-sm">No hedge candidates found. Try a position with more trading history.</p>
+                  <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-32">
+                    <p className="text-gray-500 text-sm">No hedge candidates passed the quality threshold.</p>
                   </div>
                 ) : (
                   <>
@@ -342,6 +380,10 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
                       <RecommendationCard key={rec.candidate_market_id} rec={rec} index={i} />
                     ))}
                   </>
+                )}
+
+                {result.failed_candidates?.length > 0 && (
+                  <FailedCandidatesBlock failed={result.failed_candidates} />
                 )}
               </>
             )}
