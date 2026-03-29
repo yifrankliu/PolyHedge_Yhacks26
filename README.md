@@ -1,6 +1,7 @@
 # PolyHedge
 
 > TradFi-grade risk management infrastructure for prediction markets — hedge scanning, strategy construction, and Monte Carlo stress testing.
+> Made for Yhacks 2026.
 
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)](https://fastapi.tiangolo.com)
 [![Frontend](https://img.shields.io/badge/frontend-React%2019-61DAFB?style=flat-square)](https://react.dev)
