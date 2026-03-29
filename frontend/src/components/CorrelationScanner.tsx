@@ -100,9 +100,9 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
     setFound(0);
     setError('');
 
-    const es = new EventSource(
-      `${BASE_URL}/correlate/scan/stream?market_id=${encodeURIComponent(selectedMarket.id)}`
-    );
+    const params = new URLSearchParams({ market_id: selectedMarket.id });
+    if (selectedMarket.question) params.set('target_question', selectedMarket.question);
+    const es = new EventSource(`${BASE_URL}/correlate/scan/stream?${params.toString()}`);
     esRef.current = es;
 
     es.onmessage = (e) => {

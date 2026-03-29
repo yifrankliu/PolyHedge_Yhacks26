@@ -1197,7 +1197,7 @@ async def vol_surface(asset: str = Query("BTC")):
 
 
 @app.get("/correlate/scan/stream")
-async def correlate_scan_stream(market_id: str = Query(...)):
+async def correlate_scan_stream(market_id: str = Query(...), target_question: str = Query("")):
     """SSE stream: scan the Polymarket universe for markets correlated with market_id."""
 
     async def event_gen():
@@ -1224,12 +1224,13 @@ async def correlate_scan_stream(market_id: str = Query(...)):
 
         # Resolve target question & end-date (may already be in universe)
         target_meta = next((m for m in universe if m["conditionId"] == market_id), None)
-        target_question = target_meta["question"] if target_meta else ""
+        # Use universe metadata if available; fall back to the question passed by the frontend
+        resolved_question = (target_meta["question"] if target_meta else None) or target_question
         target_end_date = target_meta.get("endDate") if target_meta else None
 
         # Pre-compute all candidate embeddings in one batch (fast: ~0.1s for 1000 items)
         candidate_questions = [m["question"] for m in candidates]
-        semantic_sims = batch_semantic_similarities(target_question, candidate_questions)
+        semantic_sims = batch_semantic_similarities(resolved_question, candidate_questions)
 
         # Phase 3 — batch scan
         BATCH = 30
