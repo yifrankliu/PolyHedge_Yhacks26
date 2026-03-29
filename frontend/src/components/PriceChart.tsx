@@ -65,7 +65,7 @@ export default function PriceChart({
   const [autoscale, setAutoscale] = useState(false);
   const [showVolume, setShowVolume] = useState(true);
 
-  const data         = history?.history ?? [];
+  const data         = useMemo(() => history?.history ?? [], [history]);
   const currentPrice = history?.current_price;
   const hasVolume    = showVolume && (volumeData?.length ?? 0) > 0;
 
