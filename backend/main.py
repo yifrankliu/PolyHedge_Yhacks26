@@ -1365,7 +1365,7 @@ async def correlate_scan_stream(market_id: str = Query(...), target_question: st
                     continue
                 if corr is None or corr.get("error"):
                     continue
-                if corr.get("composite_score", 0) > 0.1:
+                if corr.get("composite_score", 0) > 0.1 and corr.get("semantic_similarity", 0) > 0.2:
                     found += 1
                     yield sse({
                         "type": "result",
