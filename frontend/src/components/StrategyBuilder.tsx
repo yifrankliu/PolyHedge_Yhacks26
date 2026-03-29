@@ -139,10 +139,18 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
     }
   }, [demoMode, recommendations]);
   const [backtestHedgeId, setBacktestHedgeId] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, { size: number; direction: 'YES' | 'NO' }>>({});
 
   const activeStrategy = strategies.find(s => s.id === activeId) ?? strategies[0];
   // Use entry price as a proxy for current market price of A
   const pA0 = pos ? clamp(pos.entry_price_cents / 100) : 0.5;
+
+  // Returns a hedge with user overrides applied (size and/or direction)
+  const eff = (h: HedgeRecommendation): HedgeRecommendation => ({
+    ...h,
+    recommended_size: overrides[h.candidate_market_id]?.size ?? h.recommended_size,
+    hedge_direction: (overrides[h.candidate_market_id]?.direction ?? h.hedge_direction) as 'YES' | 'NO',
+  });
 
   // ── Strategy management ────────────────────────────────────────────────────
   const toggleHedge = (rec: HedgeRecommendation) => {
@@ -191,15 +199,16 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
       strategies.forEach(s => {
         let ev = pA * posY + (1 - pA) * posN;
         for (const h of s.hedges) {
-          const pB = predictedPB(pA, pA0, h.current_price, h.correlation);
-          ev += pB * hPnL(h, true) + (1 - pB) * hPnL(h, false);
+          const eh = eff(h);
+          const pB = predictedPB(pA, pA0, eh.current_price, eh.correlation);
+          ev += pB * hPnL(eh, true) + (1 - pB) * hPnL(eh, false);
         }
         pt[s.label] = parseFloat(ev.toFixed(3));
       });
 
       return pt;
     });
-  }, [pos, strategies, pA0]);
+  }, [pos, strategies, pA0, overrides]);
 
   // ── Scenario matrix ────────────────────────────────────────────────────────
   const scenarios = useMemo(() => {
@@ -209,12 +218,13 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
     const hs = activeStrategy.hedges;
 
     // "All hedges pay out" = each resolves in its hedge_direction
-    const hBest = hs.reduce((sum, h) => sum + hPnL(h, h.hedge_direction === 'YES'), 0);
+    const hBest = hs.reduce((sum, h) => { const eh = eff(h); return sum + hPnL(eh, eh.hedge_direction === 'YES'); }, 0);
     // "All hedges lose" = each resolves against its hedge_direction
-    const hWorst = hs.reduce((sum, h) => sum + hPnL(h, h.hedge_direction !== 'YES'), 0);
+    const hWorst = hs.reduce((sum, h) => { const eh = eff(h); return sum + hPnL(eh, eh.hedge_direction !== 'YES'); }, 0);
     // P(all hedges pay) — assumes independence
     const pHPay = hs.length === 0 ? 1 : hs.reduce((p, h) => {
-      return p * (h.hedge_direction === 'YES' ? h.current_price : 1 - h.current_price);
+      const eh = eff(h);
+      return p * (eh.hedge_direction === 'YES' ? eh.current_price : 1 - eh.current_price);
     }, 1);
 
     return {
@@ -225,7 +235,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
       pHPay: clamp(pHPay),
       pHWorst: 1 - clamp(pHPay),
     };
-  }, [pos, activeStrategy]);
+  }, [pos, activeStrategy, overrides]);
 
   // ── KPIs for active strategy ───────────────────────────────────────────────
   const kpis = useMemo(() => {
@@ -237,7 +247,8 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
     // EV at current market prices
     let ev = pA0 * posPnL(pos, true) + (1 - pA0) * posPnL(pos, false);
     for (const h of activeStrategy.hedges) {
-      ev += h.current_price * hPnL(h, true) + (1 - h.current_price) * hPnL(h, false);
+      const eh = eff(h);
+      ev += eh.current_price * hPnL(eh, true) + (1 - eh.current_price) * hPnL(eh, false);
     }
 
     // Break-even: find lowest p_A where EV(p_A) >= 0 (using corr model)
@@ -245,8 +256,9 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
       const pA = i / 1000;
       let e = pA * posPnL(pos, true) + (1 - pA) * posPnL(pos, false);
       for (const h of activeStrategy.hedges) {
-        const pB = predictedPB(pA, pA0, h.current_price, h.correlation);
-        e += pB * hPnL(h, true) + (1 - pB) * hPnL(h, false);
+        const eh = eff(h);
+        const pB = predictedPB(pA, pA0, eh.current_price, eh.correlation);
+        e += pB * hPnL(eh, true) + (1 - pB) * hPnL(eh, false);
       }
       return e;
     });
@@ -258,7 +270,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
     if (breakeven === null && points[0] > 0) breakeven = 0;
 
     return { best, worst, ev, breakeven };
-  }, [pos, activeStrategy, scenarios, pA0]);
+  }, [pos, activeStrategy, scenarios, pA0, overrides]);
 
   // ── Empty states ───────────────────────────────────────────────────────────
   if (!pos) {
@@ -447,41 +459,94 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
                 {activeStrategy.hedges.length > 1 ? 's' : ''}
               </h3>
               <div className="space-y-2">
-                {activeStrategy.hedges.map(h => (
-                  <div
-                    key={h.candidate_market_id}
-                    className="flex items-center gap-2 bg-zinc-950 rounded-lg px-3 py-2"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-zinc-200 leading-snug line-clamp-1">
-                        {h.question}
-                      </p>
-                      <p className="text-[10px] text-zinc-500 mt-0.5">
-                        <span
-                          className={
-                            h.hedge_direction === 'YES' ? 'text-emerald-400' : 'text-red-400'
-                          }
+                {activeStrategy.hedges.map(h => {
+                  const eh = eff(h);
+                  const isOverridden = !!overrides[h.candidate_market_id];
+                  return (
+                    <div key={h.candidate_market_id} className="bg-zinc-950 rounded-lg px-3 py-2 space-y-2">
+                      {/* Question + remove */}
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-zinc-200 leading-snug line-clamp-1 flex-1">{h.question}</p>
+                        <button
+                          onClick={() => toggleHedge(h)}
+                          className="text-zinc-600 hover:text-red-400 transition-colors text-base leading-none flex-shrink-0"
                         >
-                          {h.hedge_direction}
-                        </span>
-                        {' '}${h.recommended_size.toFixed(0)} @ {fmtPct(h.current_price)}
-                      </p>
+                          ×
+                        </button>
+                      </div>
+                      {/* Controls row */}
+                      <div className="flex items-center gap-2">
+                        {/* Direction toggle */}
+                        <div className="flex rounded overflow-hidden border border-zinc-700 flex-shrink-0">
+                          {(['YES', 'NO'] as const).map(d => (
+                            <button
+                              key={d}
+                              onClick={() => setOverrides(prev => ({
+                                ...prev,
+                                [h.candidate_market_id]: {
+                                  size: prev[h.candidate_market_id]?.size ?? h.recommended_size,
+                                  direction: d,
+                                },
+                              }))}
+                              className={`px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                                eh.hedge_direction === d
+                                  ? d === 'YES' ? 'bg-emerald-700 text-emerald-100' : 'bg-red-800 text-red-100'
+                                  : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              {d}
+                            </button>
+                          ))}
+                        </div>
+                        {/* Size input */}
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <span className="text-zinc-500 text-[10px] flex-shrink-0">$</span>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={Math.round(eh.recommended_size)}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val) && val > 0) {
+                                setOverrides(prev => ({
+                                  ...prev,
+                                  [h.candidate_market_id]: {
+                                    direction: (prev[h.candidate_market_id]?.direction ?? h.hedge_direction) as 'YES' | 'NO',
+                                    size: val,
+                                  },
+                                }));
+                              }
+                            }}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-xs text-white tabular-nums focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <span className="text-[10px] text-zinc-500 flex-shrink-0">@ {fmtPct(h.current_price)}</span>
+                        {/* Reset to recommended */}
+                        {isOverridden && (
+                          <button
+                            onClick={() => setOverrides(prev => {
+                              const next = { ...prev };
+                              delete next[h.candidate_market_id];
+                              return next;
+                            })}
+                            className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors flex-shrink-0"
+                            title="Reset to recommended values"
+                          >
+                            reset
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      onClick={() => toggleHedge(h)}
-                      className="text-zinc-600 hover:text-red-400 transition-colors text-base leading-none"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total cost */}
               <div className="mt-3 pt-3 border-t border-zinc-800 flex justify-between text-xs">
                 <span className="text-zinc-500">Total hedge cost</span>
                 <span className="text-white font-semibold tabular-nums">
-                  ${activeStrategy.hedges.reduce((s, h) => s + h.recommended_size, 0).toFixed(2)}
+                  ${activeStrategy.hedges.reduce((s, h) => s + eff(h).recommended_size, 0).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -712,7 +777,7 @@ export default function StrategyBuilder({ positions, recommendations, onTestStra
             if (!h) return null;
             return (
               <button
-                onClick={() => onTestStrategy?.(pos, h)}
+                onClick={() => onTestStrategy?.(pos, eff(h))}
                 className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               >
                 Test Strategy →
