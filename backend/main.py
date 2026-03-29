@@ -40,7 +40,8 @@ KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
 ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+LAVA_API_KEY  = os.getenv("LAVA_API_KEY", "")
+LAVA_BASE_URL = os.getenv("LAVA_BASE_URL", "https://api.lava.so/v1")
 ODDPOOL_BASE = "https://api.oddpool.com"
 
 # ── In-memory caches ────────────────────────────────────────────────────────────
@@ -1940,84 +1941,99 @@ class SpikeInvestigationRequest(BaseModel):
 
 
 _ANALYSIS_TOOL = {
-    "name": "analyze_logical_correlation",
-    "description": "Record the logical correlation analysis between two prediction markets",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "logical_score": {
-                "type": "number",
-                "description": (
-                    "Float 0.0–1.0. 0=no logical connection, "
-                    "0.5=moderate shared driver, 1.0=direct logical dependency."
-                ),
+    "type": "function",
+    "function": {
+        "name": "analyze_logical_correlation",
+        "description": "Record the logical correlation analysis between two prediction markets",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "logical_score": {
+                    "type": "number",
+                    "description": (
+                        "Float 0.0–1.0. 0=no logical connection, "
+                        "0.5=moderate shared driver, 1.0=direct logical dependency."
+                    ),
+                },
+                "relationship_type": {
+                    "type": "string",
+                    "enum": ["causal", "shared_driver", "thematic", "inverse", "coincidental", "none"],
+                    "description": "Nature of the logical relationship.",
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "1–2 sentences explaining the relationship in plain English.",
+                },
             },
-            "relationship_type": {
-                "type": "string",
-                "enum": ["causal", "shared_driver", "thematic", "inverse", "coincidental", "none"],
-                "description": "Nature of the logical relationship.",
-            },
-            "explanation": {
-                "type": "string",
-                "description": "1–2 sentences explaining the relationship in plain English.",
-            },
+            "required": ["logical_score", "relationship_type", "explanation"],
         },
-        "required": ["logical_score", "relationship_type", "explanation"],
     },
 }
 
 _SPIKE_TOOL = {
-    "name": "record_spike_investigation",
-    "description": "Record the findings from investigating a prediction-market price spike",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "events": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "2–4 bullet-point news events or developments from around this date that likely affected the market price.",
+    "type": "function",
+    "function": {
+        "name": "record_spike_investigation",
+        "description": "Record the findings from investigating a prediction-market price spike",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2–4 bullet-point news events or developments from around this date that likely affected the market price.",
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "2–3 sentences explaining how those events drove the price movement.",
+                },
+                "confidence": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"],
+                    "description": "Confidence in the explanation based on news coverage found.",
+                },
             },
-            "explanation": {
-                "type": "string",
-                "description": "2–3 sentences explaining how those events drove the price movement.",
-            },
-            "confidence": {
-                "type": "string",
-                "enum": ["high", "medium", "low"],
-                "description": "Confidence in the explanation based on news coverage found.",
-            },
+            "required": ["events", "explanation", "confidence"],
         },
-        "required": ["events", "explanation", "confidence"],
     },
 }
 
 
 async def _run_web_search_context(client, query: str, max_tokens: int = 1500) -> tuple[str, str]:
     """
-    Ask Claude (with server-side web_search enabled) to research `query`.
+    Ask the LLM via Lava to research `query` using its training knowledge.
     Returns (text_result, error_detail).
-    - text_result: Claude's findings as plain text, or "" if nothing found.
-    - error_detail: non-empty string if the search failed, "" on success.
-    Prints full debug info to stdout so it appears in the uvicorn log.
+    Note: Lava uses an OpenAI-compatible gateway; the Anthropic server-side
+    web_search tool is not available through this interface, so the model
+    reasons from its training data instead.
     """
-    print(f"\n[web_search] query=\n{query}\n")
+    print(f"\n[lava_research] query=\n{query}\n")
     try:
-        resp = await client.messages.create(
+        resp = await client.chat.completions.create(
             model="claude-haiku-4-5",
             max_tokens=max_tokens,
-            tools=[{"type": "web_search_20260209", "name": "web_search"}],
-            messages=[{"role": "user", "content": query}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a knowledgeable research assistant. "
+                        "Answer questions about current events, political facts, "
+                        "economic data, and market-relevant information as accurately "
+                        "as possible based on your training data. Be concise and factual."
+                    ),
+                },
+                {"role": "user", "content": query},
+            ],
         )
-        print(f"[web_search] stop_reason={resp.stop_reason}  blocks={[type(b).__name__ for b in resp.content]}")
-        text_parts = [b.text for b in resp.content if hasattr(b, "text")]
-        result = "\n".join(text_parts).strip()
-        print(f"[web_search] text_length={len(result)}")
+        result = resp.choices[0].message.content or ""
+        result = result.strip()
+        print(f"[lava_research] text_length={len(result)}")
         if result:
-            print(f"[web_search] first 500 chars:\n{result[:500]}")
+            print(f"[lava_research] first 500 chars:\n{result[:500]}")
         return result, ""
     except Exception as exc:
         err = f"{type(exc).__name__}: {exc}"
-        print(f"[web_search] ERROR: {err}")
+        print(f"[lava_research] ERROR: {err}")
         return "", err
 
 
@@ -2038,11 +2054,11 @@ async def _analyze_logical_correlation(q_a: str, q_b: str, pearson_r: float, sem
       0.6–0.8  Strong — clear causal mechanism
       0.8–1.0  Very strong / direct logical dependency
     """
-    if not ANTHROPIC_API_KEY:
+    if not LAVA_API_KEY:
         return {
             "logical_score": 0.0,
             "relationship_type": "none",
-            "explanation": "Logical analysis unavailable — ANTHROPIC_API_KEY not configured.",
+            "explanation": "Logical analysis unavailable — LAVA_API_KEY not configured.",
         }
 
     # ── Cache check (order-independent key) ──────────────────────────────────
@@ -2052,26 +2068,26 @@ async def _analyze_logical_correlation(q_a: str, q_b: str, pearson_r: float, sem
     if cached and time.time() - cached[1] < NEWS_CACHE_TTL:
         return cached[0]
 
-    import anthropic  # lazy import
+    from openai import AsyncOpenAI  # lazy import
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = AsyncOpenAI(api_key=LAVA_API_KEY, base_url=LAVA_BASE_URL)
 
-    # ── Step 1: web-search for current factual context ────────────────────────
+    # ── Step 1: gather factual context from the model's knowledge ─────────────
     search_query = (
-        f"Search for current news and facts relevant to these two prediction market questions:\n"
+        f"What are the current facts relevant to these two prediction market questions?\n"
         f'1. "{q_a}"\n'
         f'2. "{q_b}"\n\n'
-        f"Find: who currently holds relevant offices, recent polls or economic data, "
-        f"and any news that would help assess whether outcomes are logically connected. "
-        f"Summarise what you find in a few sentences."
+        f"Include: who currently holds relevant offices, recent polls or economic data, "
+        f"and any facts that help assess whether outcomes are logically connected. "
+        f"Summarise in a few sentences."
     )
     factual_context, _search_err = await _run_web_search_context(client, search_query)
 
     # ── Step 2: structured logical-correlation analysis ───────────────────────
     context_block = (
-        f"\n\nFactual context retrieved via web search:\n{factual_context}\n"
+        f"\n\nFactual context:\n{factual_context}\n"
         if factual_context else
-        "\n\n(No web-search context available — reason from mechanism only.)\n"
+        "\n\n(No factual context available — reason from mechanism only.)\n"
     )
 
     analysis_prompt = (
@@ -2096,24 +2112,26 @@ async def _analyze_logical_correlation(q_a: str, q_b: str, pearson_r: float, sem
     )
 
     try:
-        response = await client.messages.create(
+        response = await client.chat.completions.create(
             model="claude-haiku-4-5",
             max_tokens=512,
             tools=[_ANALYSIS_TOOL],
-            tool_choice={"type": "tool", "name": "analyze_logical_correlation"},
+            tool_choice={"type": "function", "function": {"name": "analyze_logical_correlation"}},
             messages=[{"role": "user", "content": analysis_prompt}],
         )
 
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "analyze_logical_correlation":
-                inp = block.input
-                result = {
-                    "logical_score": float(max(0.0, min(1.0, inp.get("logical_score", 0.0)))),
-                    "relationship_type": inp.get("relationship_type", "none"),
-                    "explanation": inp.get("explanation", ""),
-                }
-                _news_cache[cache_key] = (result, time.time())
-                return result
+        choice = response.choices[0]
+        if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                if tc.function.name == "analyze_logical_correlation":
+                    inp = json.loads(tc.function.arguments)
+                    result = {
+                        "logical_score": float(max(0.0, min(1.0, inp.get("logical_score", 0.0)))),
+                        "relationship_type": inp.get("relationship_type", "none"),
+                        "explanation": inp.get("explanation", ""),
+                    }
+                    _news_cache[cache_key] = (result, time.time())
+                    return result
 
         return {
             "logical_score": 0.0,
@@ -2137,12 +2155,12 @@ async def _investigate_spike(question: str, spike_ts: int, spike_price: float, m
 
     Results cached by (market_id or question hash) + date string for 24 h.
     """
-    if not ANTHROPIC_API_KEY:
+    if not LAVA_API_KEY:
         return {
             "date": datetime.fromtimestamp(spike_ts, tz=timezone.utc).strftime("%b %d, %Y"),
             "price": spike_price,
             "events": [],
-            "explanation": "Spike investigation unavailable — ANTHROPIC_API_KEY not configured.",
+            "explanation": "Spike investigation unavailable — LAVA_API_KEY not configured.",
             "confidence": "low",
         }
 
@@ -2156,26 +2174,26 @@ async def _investigate_spike(question: str, spike_ts: int, spike_price: float, m
     if cached and time.time() - cached[1] < 86_400:   # 24-hour TTL for spike cache
         return cached[0]
 
-    import anthropic
+    from openai import AsyncOpenAI
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = AsyncOpenAI(api_key=LAVA_API_KEY, base_url=LAVA_BASE_URL)
 
-    # ── Step 1: search for news around the spike date ─────────────────────────
+    # ── Step 1: gather context about news around the spike date ───────────────
     search_query = (
-        f"Search for news and events from around {date_label} that would affect "
-        f"this prediction market: \"{question}\".\n\n"
+        f"What news and events happened around {date_label} that would affect "
+        f"this prediction market: \"{question}\"?\n\n"
         f"Look for: breaking news, political developments, economic data releases, "
         f"polls, announcements, or any other events from {date_label} (±3 days) "
-        f"that are relevant to this market question. List the key events you find."
+        f"that are relevant to this market question. List the key events you know about."
     )
     news_context, search_err = await _run_web_search_context(client, search_query, max_tokens=2000)
 
     # ── Step 2: structured spike explanation ──────────────────────────────────
     price_pct = round(spike_price * 100, 1)
     context_block = (
-        f"\n\nNews context from web search:\n{news_context}\n"
+        f"\n\nContext from research:\n{news_context}\n"
         if news_context else
-        "\n\n(No web-search context found for this date.)\n"
+        "\n\n(No context found for this date.)\n"
     )
 
     analysis_prompt = (
@@ -2184,7 +2202,7 @@ async def _investigate_spike(question: str, spike_ts: int, spike_price: float, m
         f'Date of price spike: {date_label}\n'
         f'Price at that point: {price_pct}¢\n'
         f'{context_block}\n'
-        f'Based on the news context above, identify 2–4 specific events from '
+        f'Based on the context above, identify 2–4 specific events from '
         f'around {date_label} that likely caused or contributed to this price level, '
         f'and explain in 2–3 sentences how those events connect to the market outcome.\n\n'
         f'If no relevant news was found, say so clearly and set confidence to "low".\n\n'
@@ -2192,29 +2210,31 @@ async def _investigate_spike(question: str, spike_ts: int, spike_price: float, m
     )
 
     try:
-        response = await client.messages.create(
+        response = await client.chat.completions.create(
             model="claude-haiku-4-5",
             max_tokens=600,
             tools=[_SPIKE_TOOL],
-            tool_choice={"type": "tool", "name": "record_spike_investigation"},
+            tool_choice={"type": "function", "function": {"name": "record_spike_investigation"}},
             messages=[{"role": "user", "content": analysis_prompt}],
         )
 
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "record_spike_investigation":
-                inp = block.input
-                result = {
-                    "date": date_label,
-                    "price": spike_price,
-                    "events": inp.get("events", []),
-                    "explanation": inp.get("explanation", ""),
-                    "confidence": inp.get("confidence", "low"),
-                    # Debug fields — visible in UI's expandable section
-                    "search_query": search_query,
-                    "raw_context": news_context or f"(empty — search error: {search_err})" if search_err else "(empty — no results returned)",
-                }
-                _news_cache[cache_key] = (result, time.time())
-                return result
+        choice = response.choices[0]
+        if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                if tc.function.name == "record_spike_investigation":
+                    inp = json.loads(tc.function.arguments)
+                    result = {
+                        "date": date_label,
+                        "price": spike_price,
+                        "events": inp.get("events", []),
+                        "explanation": inp.get("explanation", ""),
+                        "confidence": inp.get("confidence", "low"),
+                        # Debug fields — visible in UI's expandable section
+                        "search_query": search_query,
+                        "raw_context": news_context or (f"(empty — error: {search_err})" if search_err else "(empty — no results returned)"),
+                    }
+                    _news_cache[cache_key] = (result, time.time())
+                    return result
 
         return {
             "date": date_label, "price": spike_price,
