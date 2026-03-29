@@ -12,7 +12,19 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { searchPolymarket, getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+import { searchPolymarket, lookupPolymarketBySlug, getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+
+function extractPolymarketSlug(input: string): string | null {
+  try {
+    const url = new URL(input.trim());
+    if (!url.hostname.includes('polymarket.com')) return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    // pathname: /event/{event-slug}/{market-slug}
+    return parts.length >= 3 ? parts[2] : null;
+  } catch {
+    return null;
+  }
+}
 
 const INTERVALS = [
   { label: '1W', value: '1w' },
@@ -40,7 +52,10 @@ function MarketPicker({
     if (!query.trim()) return;
     setLoading(true);
     try {
-      setResults(await searchPolymarket(query));
+      const slug = extractPolymarketSlug(query);
+      setResults(slug
+        ? await lookupPolymarketBySlug(slug)
+        : await searchPolymarket(query));
     } catch {
       setResults([]);
     } finally {
@@ -76,7 +91,7 @@ function MarketPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && search()}
-          placeholder="Search Polymarket..."
+          placeholder="Search or paste a Polymarket URL..."
           className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
         />
         <button
@@ -383,7 +398,7 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
   );
 }
 
-export default function MarketCompare() {
+export default function MarketCompare({ initialMarketB }: { initialMarketB?: Market }) {
   const [marketA, setMarketA] = useState<Market | null>(null);
   const [marketB, setMarketB] = useState<Market | null>(null);
   const [historyA, setHistoryA] = useState<MarketHistory | null>(null);
@@ -437,6 +452,14 @@ export default function MarketCompare() {
     setMarketB(m);
     fetchHistory(m, 'B', interval);
   };
+
+  // Pre-populate Market B when navigating from Correlation Scanner
+  useEffect(() => {
+    if (initialMarketB?.id) {
+      handleSelectB(initialMarketB);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMarketB?.id]);
 
   const handleIntervalChange = (iv: string) => {
     setInterval(iv);

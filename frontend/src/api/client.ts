@@ -84,6 +84,9 @@ export interface MarketHistory {
   history: PricePoint[];
 }
 
+export const lookupPolymarketBySlug = (slug: string) =>
+  api.get<Market[]>('/markets/polymarket/by-slug', { params: { slug } }).then(r => r.data);
+
 export const getPolymarketHistory = (marketId: string, interval = '1m') =>
   api.get<MarketHistory>(`/markets/polymarket/${marketId}/history`, { params: { interval } }).then(r => r.data);
 

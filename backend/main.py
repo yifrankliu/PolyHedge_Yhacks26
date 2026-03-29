@@ -1,8 +1,11 @@
 import asyncio
+import json
 import os
+import time
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -38,6 +41,84 @@ KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 POLYMARKET_GAMMA = "https://gamma-api.polymarket.com"
 ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
 ODDPOOL_BASE = "https://api.oddpool.com"
+
+# ── In-memory caches ────────────────────────────────────────────────────────────
+CACHE_TTL = 3600  # 1 hour
+_universe_cache: dict = {"markets": [], "fetched_at": 0.0}
+_history_cache: dict[str, tuple[list, float]] = {}  # conditionId → (history, timestamp)
+
+
+async def fetch_market_universe(size: int = 1000) -> list[dict]:
+    """Fetch top `size` active Polymarket markets by volume from Gamma API (cached 1h)."""
+    global _universe_cache
+    if time.time() - _universe_cache["fetched_at"] < CACHE_TTL and len(_universe_cache["markets"]) >= size:
+        return _universe_cache["markets"][:size]
+
+    pages = size // 100
+    async with httpx.AsyncClient(timeout=15) as client:
+        resps = await asyncio.gather(*[
+            client.get(f"{POLYMARKET_GAMMA}/markets", params={
+                "limit": 100, "active": True,
+                "order": "volumeNum", "ascending": False,
+                "offset": i * 100,
+            })
+            for i in range(pages)
+        ], return_exceptions=True)
+
+    markets = []
+    seen: set[str] = set()
+    for resp in resps:
+        if isinstance(resp, Exception) or resp.status_code != 200:
+            continue
+        raw = resp.json()
+        page = raw if isinstance(raw, list) else raw.get("markets", [])
+        for m in page:
+            cid = m.get("conditionId")
+            if not cid or cid in seen:
+                continue
+            if not m.get("clobTokenIds"):
+                continue
+            seen.add(cid)
+            markets.append({
+                "conditionId": cid,
+                "question": m.get("question", ""),
+                "lastTradePrice": float(m.get("lastTradePrice") or 0),
+            })
+
+    _universe_cache = {"markets": markets, "fetched_at": time.time()}
+    return markets[:size]
+
+
+async def fetch_clob_history_cached(condition_id: str) -> tuple[str, list] | None:
+    """Fetch CLOB daily history for a conditionId, with 1h in-memory cache."""
+    if condition_id in _history_cache:
+        history, ts = _history_cache[condition_id]
+        if time.time() - ts < CACHE_TTL:
+            return ("", history)  # question not cached, but history is
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            clob_resp = await client.get(f"https://clob.polymarket.com/markets/{condition_id}")
+        if clob_resp.status_code != 200:
+            return None
+        tokens = clob_resp.json().get("tokens") or []
+        yes_token = next((t for t in tokens if t.get("outcome", "").lower() == "yes"), tokens[0] if tokens else None)
+        if not yes_token:
+            return None
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            hist_resp = await client.get(
+                "https://clob.polymarket.com/prices-history",
+                params={"market": yes_token["token_id"], "interval": "max", "fidelity": 1440},
+            )
+        if hist_resp.status_code != 200:
+            return None
+
+        history = hist_resp.json().get("history", [])
+        _history_cache[condition_id] = (history, time.time())
+        return ("", history)
+    except Exception:
+        return None
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -316,6 +397,31 @@ async def bl_comparison(
     }
 
 
+@app.get("/markets/polymarket/by-slug")
+async def polymarket_by_slug(slug: str = Query(..., min_length=1)):
+    """Look up a single Polymarket market by its URL slug via Gamma API (bypasses Oddpool)."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={"slug": slug, "limit": 1},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
+    raw = resp.json()
+    markets = raw if isinstance(raw, list) else raw.get("markets", [])
+    if not markets:
+        raise HTTPException(404, "No market found for that slug")
+    m = markets[0]
+    return [{
+        "id": m.get("conditionId") or str(m.get("id")),
+        "question": m.get("question"),
+        "price": float(m.get("lastTradePrice") or 0),
+        "volume": m.get("volumeNum") or m.get("volume"),
+        "end_date": m.get("endDateIso") or m.get("endDate"),
+        "source": "polymarket",
+    }]
+
+
 @app.get("/markets/polymarket/{market_id}/history")
 async def polymarket_history(market_id: str, interval: str = "1m"):
     # Resolve conditionId → YES token ID directly via CLOB API (no Gamma roundtrip)
@@ -331,11 +437,14 @@ async def polymarket_history(market_id: str, interval: str = "1m"):
         raise HTTPException(404, "No YES token found for this market")
     token_id = yes_token["token_id"]
 
+    # Fidelity (minutes per candle): use daily for long ranges to avoid point caps
+    fidelity = 1440 if interval in ("max", "3m") else 60
+
     # Fetch price history from CLOB API
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             "https://clob.polymarket.com/prices-history",
-            params={"market": token_id, "interval": interval, "fidelity": 60},
+            params={"market": token_id, "interval": interval, "fidelity": fidelity},
         )
     if resp.status_code != 200:
         raise HTTPException(502, f"Polymarket CLOB history error: {resp.status_code}")
@@ -384,6 +493,85 @@ async def vol_surface(asset: str = Query("BTC")):
         return await fetch_vol_surface(asset)
     except Exception as e:
         raise HTTPException(502, str(e))
+
+
+@app.get("/correlate/scan/stream")
+async def correlate_scan_stream(market_id: str = Query(...)):
+    """SSE stream: scan the Polymarket universe for markets correlated with market_id."""
+
+    async def event_gen():
+        def sse(payload: dict) -> str:
+            return f"data: {json.dumps(payload)}\n\n"
+
+        # Phase 1 — fetch universe
+        try:
+            universe = await fetch_market_universe(1000)
+        except Exception as e:
+            yield sse({"type": "error", "message": f"Universe fetch failed: {e}"})
+            return
+
+        candidates = [m for m in universe if m["conditionId"] != market_id]
+        total = len(candidates)
+        yield sse({"type": "init", "total": total})
+
+        # Phase 2 — fetch target history
+        target = await fetch_clob_history_cached(market_id)
+        if target is None:
+            yield sse({"type": "error", "message": "Could not fetch target market history"})
+            return
+        _, hist_a = target
+
+        # Phase 3 — batch scan
+        BATCH = 30
+        scanned = 0
+        found = 0
+
+        for i in range(0, total, BATCH):
+            batch = candidates[i : i + BATCH]
+            results = await asyncio.gather(*[
+                fetch_clob_history_cached(m["conditionId"]) for m in batch
+            ], return_exceptions=True)
+
+            for m, res in zip(batch, results):
+                scanned += 1
+                if isinstance(res, Exception) or res is None:
+                    continue
+                _, hist_b = res
+                try:
+                    corr = correlate(market_id, m["conditionId"], hist_a, hist_b)
+                except Exception:
+                    continue
+                if corr is None or corr.get("error"):
+                    continue
+                if corr.get("composite_score", 0) > 0.1:
+                    found += 1
+                    yield sse({
+                        "type": "result",
+                        "market_id": m["conditionId"],
+                        "question": m["question"],
+                        "last_price": m["lastTradePrice"],
+                        "composite_score": corr["composite_score"],
+                        "full_pearson": corr["full_pearson"],
+                        "full_pearson_returns": corr["full_pearson_returns"],
+                        "best_lag_days": corr["best_lag_days"],
+                        "lead_direction": corr["lead_direction"],
+                        "shared_history_days": corr["shared_history_days"],
+                        "n_observations": corr["n_observations"],
+                        "rolling_mean": corr["rolling_mean"],
+                        "rolling_std": corr["rolling_std"],
+                        "break_detected": corr["break_detected"],
+                        "granger_dominant_direction": corr.get("granger_dominant_direction"),
+                    })
+
+            yield sse({"type": "progress", "scanned": scanned, "total": total, "found": found})
+
+        yield sse({"type": "done", "scanned": scanned, "found": found})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/health")
