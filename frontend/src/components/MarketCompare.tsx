@@ -12,19 +12,8 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { searchPolymarket, lookupPolymarketBySlug, getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
-
-function extractPolymarketSlug(input: string): string | null {
-  try {
-    const url = new URL(input.trim());
-    if (!url.hostname.includes('polymarket.com')) return null;
-    const parts = url.pathname.split('/').filter(Boolean);
-    // pathname: /event/{event-slug}/{market-slug}
-    return parts.length >= 3 ? parts[2] : null;
-  } catch {
-    return null;
-  }
-}
+import { getPolymarketHistory, correlateMarkets, Market, MarketHistory, CorrelationResult } from '../api/client';
+import MarketSearchWidget from './MarketSearchWidget';
 
 const INTERVALS = [
   { label: '1W', value: '1w' },
@@ -32,97 +21,6 @@ const INTERVALS = [
   { label: '3M', value: '3m' },
   { label: 'All', value: 'max' },
 ];
-
-function MarketPicker({
-  label,
-  color,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  color: string;
-  selected: Market | null;
-  onSelect: (m: Market) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const search = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    try {
-      const slug = extractPolymarketSlug(query);
-      setResults(slug
-        ? await lookupPolymarketBySlug(slug)
-        : await searchPolymarket(query));
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-900 rounded-xl p-5 border border-gray-700">
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`w-3 h-3 rounded-full`} style={{ backgroundColor: color }} />
-        <h3 className="text-sm font-semibold text-gray-200 uppercase tracking-wider">{label}</h3>
-      </div>
-
-      {selected && (
-        <div className="mb-3 p-3 rounded-lg bg-gray-800 border border-gray-600">
-          <p className="text-sm text-white font-medium leading-snug">{selected.question}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {selected.price != null ? `${(selected.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-            {selected.end_date ? new Date(selected.end_date).toLocaleDateString() : '?'}
-          </p>
-          <button
-            onClick={() => onSelect({ ...selected, id: '' } as any)}
-            className="text-xs text-gray-500 hover:text-gray-300 mt-1"
-          >
-            Change market
-          </button>
-        </div>
-      )}
-
-      <div className="flex gap-2 mb-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && search()}
-          placeholder="Search or paste a Polymarket URL..."
-          className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
-        />
-        <button
-          onClick={search}
-          disabled={loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-        >
-          {loading ? '...' : 'Search'}
-        </button>
-      </div>
-
-      {results.length > 0 && (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 max-h-52 overflow-y-auto">
-          {results.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => { onSelect(m); setResults([]); setQuery(''); }}
-              className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
-            >
-              <p className="text-sm text-white truncate">{m.question}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {m.price != null ? `${(m.price * 100).toFixed(1)}¢` : 'N/A'} ·{' '}
-                ends {m.end_date ? new Date(m.end_date).toLocaleDateString() : '?'}
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -543,8 +441,8 @@ export default function MarketCompare({ initialMarketA, initialMarketB }: { init
 
       {/* Market pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <MarketPicker label="Market A" color={MARKET_A_COLOR} selected={marketA} onSelect={handleSelectA} />
-        <MarketPicker label="Market B" color={MARKET_B_COLOR} selected={marketB} onSelect={handleSelectB} />
+        <MarketSearchWidget label="Market A" accentColor={MARKET_A_COLOR} selected={marketA} onSelect={handleSelectA} />
+        <MarketSearchWidget label="Market B" accentColor={MARKET_B_COLOR} selected={marketB} onSelect={handleSelectB} />
       </div>
 
       {/* Time range selector */}

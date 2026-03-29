@@ -45,9 +45,11 @@ ODDPOOL_API_KEY = os.getenv("ODDPOOL_API_KEY", "")
 ODDPOOL_BASE = "https://api.oddpool.com"
 
 # ── In-memory caches ────────────────────────────────────────────────────────────
-CACHE_TTL = 3600  # 1 hour
+CACHE_TTL = 3600       # 1 hour  (universe + history)
+TAG_CACHE_TTL = 86_400 # 24 hours (tags rarely change)
 _universe_cache: dict = {"markets": [], "fetched_at": 0.0}
 _history_cache: dict[str, tuple[list, float]] = {}  # conditionId → (history, timestamp)
+_tag_cache: dict = {"tags": [], "fetched_at": 0.0}
 
 # ── Semantic embedding helpers ───────────────────────────────────────────────
 _embed_model = None
@@ -131,10 +133,10 @@ async def fetch_market_universe(size: int = 1000) -> list[dict]:
         resps = await asyncio.gather(*[
             client.get(f"{POLYMARKET_GAMMA}/markets", params={
                 "limit": 100,
-                "active": True,
-                "closed": False,          # exclude resolved/closed markets
+                "active": "true",
+                "closed": "false",        # exclude resolved/closed markets
                 "order": "volumeNum",
-                "ascending": False,
+                "ascending": "false",
                 "offset": i * 100,
             })
             for i in range(pages)
@@ -205,6 +207,242 @@ async def fetch_clob_history_cached(condition_id: str) -> tuple[str, list] | Non
         return ("", history)
     except Exception:
         return None
+
+
+# ── Tag helpers ───────────────────────────────────────────────────────────────
+
+async def fetch_tags_cached() -> list[dict]:
+    """Fetch all Gamma tags, cached 24h. Returns [{id, slug, label, count}]."""
+    global _tag_cache
+    if time.time() - _tag_cache["fetched_at"] < TAG_CACHE_TTL and _tag_cache["tags"]:
+        print(f"[TAGS] fetch_tags_cached: serving {len(_tag_cache['tags'])} tags from cache")
+        return _tag_cache["tags"]
+    url = f"{POLYMARKET_GAMMA}/tags"
+    print(f"[TAGS] fetch_tags_cached → GET {url} params={{limit: 200}}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params={"limit": 200})
+        print(f"[TAGS] fetch_tags_cached ← status={resp.status_code} body[:200]={resp.text[:200]!r}")
+        if resp.status_code == 200:
+            tags = resp.json() if isinstance(resp.json(), list) else []
+            print(f"[TAGS] fetch_tags_cached: fetched {len(tags)} tags, caching")
+            _tag_cache = {"tags": tags, "fetched_at": time.time()}
+            return tags
+    except Exception as e:
+        print(f"[TAGS] fetch_tags_cached EXCEPTION: {type(e).__name__}: {e}")
+    print(f"[TAGS] fetch_tags_cached: returning stale ({len(_tag_cache['tags'])} tags)")
+    return _tag_cache["tags"]  # serve stale on failure
+
+
+# ── Unified search helpers ─────────────────────────────────────────────────────
+
+def _tag_fuzzy_score(query: str, label: str, slug: str) -> float:
+    """Returns 0.0–1.0 similarity between query and a tag. Exact=1.0, substring=0.8, word-overlap proportional."""
+    if query == label or query == slug:
+        return 1.0
+    if query in label or query in slug:
+        return 0.8
+    query_words = set(query.split())
+    label_words = set(label.split())
+    if not query_words:
+        return 0.0
+    return len(query_words & label_words) / len(query_words) * 0.7
+
+
+async def _gamma_public_search(q: str) -> list[dict]:
+    """Hit Gamma /public-search — the same engine polymarket.com uses."""
+    try:
+        # Note: keep_closed_markets omitted — Gamma rejects Python False ("False" != "false")
+        # events_status=active already filters to open markets
+        params = {"q": q, "limit_per_type": 20, "events_status": "active"}
+        url = f"{POLYMARKET_GAMMA}/public-search"
+        print(f"[SEARCH] _gamma_public_search → GET {url} params={params}")
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url, params=params)
+        print(f"[SEARCH] _gamma_public_search ← status={resp.status_code} body[:200]={resp.text[:200]!r}")
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        # public-search returns {events: [{..., markets: [...]}, ...], pagination: {...}}
+        # markets can also appear at the top level in some API versions — check both
+        print(f"[SEARCH] _gamma_public_search parsed: top-level keys={list(data.keys() if isinstance(data, dict) else [])}")
+        results = []
+
+        def _extract_market(m: dict, source_label: str):
+            cid = m.get("conditionId") or str(m.get("id", ""))
+            if not cid:
+                return
+            results.append({
+                "id": cid,
+                "question": m.get("question", ""),
+                "price": float(m.get("lastTradePrice") or 0),
+                "volume": m.get("volumeNum") or m.get("volume"),
+                "end_date": m.get("endDateIso") or m.get("endDate"),
+                "source": "polymarket",
+                "_rank_source": source_label,
+            })
+
+        if isinstance(data, dict):
+            # Markets nested inside events
+            for event in data.get("events", []):
+                for m in event.get("markets", []):
+                    _extract_market(m, "gamma_search")
+                # Some events are themselves binary markets
+                if event.get("conditionId"):
+                    _extract_market(event, "gamma_search")
+            # Top-level markets array (older API versions)
+            for m in data.get("markets", []):
+                _extract_market(m, "gamma_search")
+        elif isinstance(data, list):
+            for m in data:
+                _extract_market(m, "gamma_search")
+
+        # Dedup by conditionId within this source
+        seen, deduped = set(), []
+        for r in results:
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                deduped.append(r)
+
+        print(f"[SEARCH] _gamma_public_search returning {len(deduped)} markets (raw={len(results)})")
+        return deduped
+    except Exception as e:
+        print(f"[SEARCH] _gamma_public_search EXCEPTION: {type(e).__name__}: {e}")
+        return []
+
+
+async def _gamma_tag_search(q: str) -> list[dict]:
+    """Fuzzy-match query against cached tag list; fetch top markets for best-matching tag."""
+    try:
+        tags = await fetch_tags_cached()
+        print(f"[SEARCH] _gamma_tag_search: tags_loaded={len(tags)} query={q!r}")
+        if not tags:
+            return []
+        q_lower = q.lower()
+        best_tag, best_score = None, 0.0
+        for tag in tags:
+            score = _tag_fuzzy_score(q_lower, (tag.get("label") or "").lower(), (tag.get("slug") or "").lower())
+            if score > best_score:
+                best_score, best_tag = score, tag
+        print(f"[SEARCH] _gamma_tag_search: best_tag={best_tag and best_tag.get('label')!r} score={best_score:.3f} threshold=0.4")
+        if not best_tag or best_score < 0.4:
+            print(f"[SEARCH] _gamma_tag_search: score below threshold, returning []")
+            return []
+        # Use lowercase string "false" — httpx serializes Python False as "False" which Gamma rejects
+        params = {"tag_id": best_tag["id"], "closed": "false", "order": "volumeNum", "ascending": "false", "limit": 15}
+        url = f"{POLYMARKET_GAMMA}/markets"
+        print(f"[SEARCH] _gamma_tag_search → GET {url} params={params}")
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url, params=params)
+        print(f"[SEARCH] _gamma_tag_search ← status={resp.status_code} body[:200]={resp.text[:200]!r}")
+        if resp.status_code != 200:
+            return []
+        raw = resp.json()
+        markets = raw if isinstance(raw, list) else raw.get("markets", [])
+        results = [
+            {
+                "id": m.get("conditionId") or str(m.get("id", "")),
+                "question": m.get("question", ""),
+                "price": float(m.get("lastTradePrice") or 0),
+                "volume": m.get("volumeNum") or m.get("volume"),
+                "end_date": m.get("endDateIso") or m.get("endDate"),
+                "source": "polymarket",
+                "_rank_source": "gamma_tag",
+            }
+            for m in markets if m.get("conditionId") or m.get("id")
+        ]
+        print(f"[SEARCH] _gamma_tag_search returning {len(results)} markets")
+        return results
+    except Exception as e:
+        print(f"[SEARCH] _gamma_tag_search EXCEPTION: {type(e).__name__}: {e}")
+        return []
+
+
+async def _oddpool_search_supplement(q: str) -> list[dict]:
+    """Oddpool search capped at 2 events (~2.2s max). Supplement only."""
+    if not ODDPOOL_API_KEY:
+        print(f"[SEARCH] _oddpool_search_supplement: skipped (no API key)")
+        return []
+    headers = {"X-API-Key": ODDPOOL_API_KEY}
+    try:
+        url = f"{ODDPOOL_BASE}/search/events"
+        params = {"q": q, "limit": 20}
+        print(f"[SEARCH] _oddpool_search_supplement → GET {url} params={params}")
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params=params, headers=headers)
+        print(f"[SEARCH] _oddpool_search_supplement ← status={resp.status_code} body[:200]={resp.text[:200]!r}")
+        if resp.status_code != 200:
+            return []
+        events = resp.json() if isinstance(resp.json(), list) else []
+        poly_events = [e for e in events if e.get("exchange") == "polymarket"][:2]
+        print(f"[SEARCH] _oddpool_search_supplement: total_events={len(events)} poly_events={len(poly_events)}")
+        results, seen = [], set()
+        for event in poly_events:
+            await asyncio.sleep(1.1)
+            event_id = event.get("event_id")
+            murl = f"{ODDPOOL_BASE}/search/events/{event_id}/markets"
+            print(f"[SEARCH] _oddpool_search_supplement → GET {murl}")
+            async with httpx.AsyncClient(timeout=10) as client:
+                mresp = await client.get(murl, headers=headers)
+            print(f"[SEARCH] _oddpool_search_supplement ← markets status={mresp.status_code} body[:200]={mresp.text[:200]!r}")
+            if mresp.status_code != 200:
+                continue
+            for m in (mresp.json() if isinstance(mresp.json(), list) else []):
+                mid = m.get("market_id")
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    results.append({
+                        "id": mid,
+                        "question": m.get("question", ""),
+                        "price": float(m.get("last_yes_price") or 0),
+                        "volume": m.get("volume"),
+                        "end_date": None,
+                        "source": "polymarket",
+                        "_rank_source": "oddpool",
+                    })
+        print(f"[SEARCH] _oddpool_search_supplement returning {len(results)} markets")
+        return results
+    except Exception as e:
+        print(f"[SEARCH] _oddpool_search_supplement EXCEPTION: {type(e).__name__}: {e}")
+        return []
+
+
+def _merge_search_results(
+    gamma_results: list[dict],
+    tag_results: list[dict],
+    oddpool_results: list[dict],
+) -> list[dict]:
+    """Merge, deduplicate, and rank results. Priority: Gamma search > tag > Oddpool."""
+    seen_ids: set[str] = set()
+    seen_questions: list[str] = []
+    merged: list[dict] = []
+
+    def _q_is_dupe(q: str) -> bool:
+        q_w = set(q.lower().split())
+        for existing in seen_questions:
+            if q_w and len(q_w & set(existing.split())) / len(q_w) > 0.70:
+                return True
+        return False
+
+    def _add(item: dict):
+        cid = item.get("id", "")
+        if cid and cid in seen_ids:
+            return
+        if cid:
+            seen_ids.add(cid)
+        seen_questions.append((item.get("question") or "").lower())
+        merged.append({k: v for k, v in item.items() if not k.startswith("_")})
+
+    for item in gamma_results:
+        _add(item)
+    for item in tag_results:
+        if item.get("id", "") not in seen_ids:
+            _add(item)
+    for item in oddpool_results:
+        if not _q_is_dupe((item.get("question") or "").lower()):
+            _add(item)
+
+    return merged[:25]
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -389,7 +627,7 @@ async def bl_comparison(
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
                     f"{POLYMARKET_GAMMA}/markets",
-                    params={"limit": 300, "active": True, "order": "volume24hr", "ascending": False},
+                    params={"limit": 300, "active": "true", "order": "volume24hr", "ascending": "false"},
                 )
             if resp.status_code == 200:
                 raw = resp.json()
@@ -506,6 +744,79 @@ async def polymarket_by_slug(slug: str = Query(..., min_length=1)):
         "end_date": m.get("endDateIso") or m.get("endDate"),
         "source": "polymarket",
     }]
+
+
+@app.get("/markets/tags")
+async def list_tags():
+    """Return all Polymarket tags (cached 24h). Used by the tag-chip UI in MarketSearchWidget."""
+    tags = await fetch_tags_cached()
+    return [
+        {"id": t.get("id"), "slug": t.get("slug"), "label": t.get("label"), "count": t.get("count", 0)}
+        for t in tags if t.get("id") and t.get("label")
+    ]
+
+
+@app.get("/markets/polymarket/by-tag")
+async def markets_by_tag(tag_id: int = Query(...), limit: int = Query(20, le=50)):
+    """Fetch open Polymarket markets for a specific tag_id, ordered by volume."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={"tag_id": tag_id, "closed": "false", "order": "volumeNum", "ascending": "false", "limit": limit},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
+    raw = resp.json()
+    markets = raw if isinstance(raw, list) else raw.get("markets", [])
+    return [
+        {
+            "id": m.get("conditionId") or str(m.get("id")),
+            "question": m.get("question"),
+            "price": float(m.get("lastTradePrice") or 0),
+            "volume": m.get("volumeNum") or m.get("volume"),
+            "end_date": m.get("endDateIso") or m.get("endDate"),
+            "source": "polymarket",
+        }
+        for m in markets if m.get("conditionId") or m.get("id")
+    ]
+
+
+@app.get("/markets/polymarket/search")
+async def search_polymarket_unified(q: str = Query(..., min_length=1)):
+    """
+    Unified Polymarket search: Gamma /public-search + tag fuzzy-match + Oddpool supplement,
+    all run in parallel. Results deduplicated and merged (max 25).
+    """
+    print(f"\n[SEARCH] ── /markets/polymarket/search q={q!r} ──────────────────────")
+
+    async def _empty() -> list:
+        return []
+
+    gamma_task   = _gamma_public_search(q)
+    tag_task     = _gamma_tag_search(q)
+    oddpool_task = _oddpool_search_supplement(q) if ODDPOOL_API_KEY else _empty()
+
+    gamma_results, tag_results, oddpool_results = await asyncio.gather(
+        gamma_task, tag_task, oddpool_task, return_exceptions=True
+    )
+
+    print(f"[SEARCH] gather results: gamma={repr(gamma_results)[:120]} tag={repr(tag_results)[:80]} oddpool={repr(oddpool_results)[:80]}")
+
+    gamma_list   = gamma_results   if isinstance(gamma_results, list)   else []
+    tag_list     = tag_results     if isinstance(tag_results, list)     else []
+    oddpool_list = oddpool_results if isinstance(oddpool_results, list) else []
+
+    print(f"[SEARCH] counts before merge: gamma={len(gamma_list)} tag={len(tag_list)} oddpool={len(oddpool_list)}")
+    if not isinstance(gamma_results, list):
+        print(f"[SEARCH] gamma EXCEPTION: {gamma_results}")
+    if not isinstance(tag_results, list):
+        print(f"[SEARCH] tag EXCEPTION: {tag_results}")
+    if not isinstance(oddpool_results, list):
+        print(f"[SEARCH] oddpool EXCEPTION: {oddpool_results}")
+
+    merged = _merge_search_results(gamma_list, tag_list, oddpool_list)
+    print(f"[SEARCH] merged total={len(merged)} returning to client")
+    return merged
 
 
 @app.get("/markets/polymarket/{market_id}/history")

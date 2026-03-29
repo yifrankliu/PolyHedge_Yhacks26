@@ -1,18 +1,8 @@
 import { useState, useRef } from 'react';
-import { searchPolymarket, lookupPolymarketBySlug, Market } from '../api/client';
+import { Market } from '../api/client';
+import MarketSearchWidget from './MarketSearchWidget';
 
 const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-
-function extractPolymarketSlug(input: string): string | null {
-  try {
-    const url = new URL(input.trim());
-    if (!url.hostname.includes('polymarket.com')) return null;
-    const parts = url.pathname.split('/').filter(Boolean);
-    return parts.length >= 3 ? parts[2] : null;
-  } catch {
-    return null;
-  }
-}
 
 interface ScanResult {
   market_id: string;
@@ -76,9 +66,6 @@ function semanticBar(sim: number) {
 }
 
 export default function CorrelationScanner({ onCompare }: { onCompare: (target: Market, correlated: Market) => void }) {
-  const [query, setQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Market[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
 
   const [scanning, setScanning] = useState(false);
@@ -91,23 +78,9 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
 
   const esRef = useRef<EventSource | null>(null);
 
-  const search = async () => {
-    if (!query.trim()) return;
-    setSearchLoading(true);
-    try {
-      const slug = extractPolymarketSlug(query);
-      setSearchResults(slug ? await lookupPolymarketBySlug(slug) : await searchPolymarket(query));
-    } catch {
-      setSearchResults([]);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const selectMarket = (m: Market) => {
+  const handleMarketSelect = (m: Market) => {
+    if (!m.id) { setSelectedMarket(null); return; }
     setSelectedMarket(m);
-    setSearchResults([]);
-    setQuery('');
     setResults([]);
     setDone(false);
     setScanned(0);
@@ -179,56 +152,13 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (target: 
       </div>
 
       {/* Market selector */}
-      <div className="bg-gray-900 rounded-xl border border-gray-700 p-5 mb-5">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Target Market</h3>
-
-        {selectedMarket && (
-          <div className="mb-3 p-3 rounded-lg bg-gray-800 border border-indigo-500 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm text-white font-medium leading-snug">{selectedMarket.question}</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {selectedMarket.price != null ? `${(selectedMarket.price * 100).toFixed(1)}¢` : 'N/A'} · {selectedMarket.id.slice(0, 12)}…
-              </p>
-            </div>
-            <button onClick={() => setSelectedMarket(null)} className="text-xs text-gray-500 hover:text-gray-300 flex-shrink-0 mt-0.5">
-              Change
-            </button>
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && search()}
-            placeholder="Search or paste a Polymarket URL..."
-            className="flex-1 bg-gray-700 text-white rounded px-3 py-2 text-sm border border-gray-600 focus:outline-none focus:border-indigo-500"
-          />
-          <button
-            onClick={search}
-            disabled={searchLoading}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-          >
-            {searchLoading ? '...' : 'Search'}
-          </button>
-        </div>
-
-        {searchResults.length > 0 && (
-          <div className="mt-2 bg-gray-800 rounded-lg border border-gray-700 max-h-52 overflow-y-auto">
-            {searchResults.map(m => (
-              <button
-                key={m.id}
-                onClick={() => selectMarket(m)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-0"
-              >
-                <p className="text-sm text-white truncate">{m.question}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {m.price != null ? `${(m.price * 100).toFixed(1)}¢` : 'N/A'} · ends {m.end_date ? new Date(m.end_date).toLocaleDateString() : '?'}
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="mb-5">
+        <MarketSearchWidget
+          label="Target Market"
+          selected={selectedMarket}
+          onSelect={handleMarketSelect}
+          placeholder="Search or paste a Polymarket URL..."
+        />
       </div>
 
       {/* Scan controls */}
