@@ -315,7 +315,7 @@ export default function HedgeScanner({
       } else if (d.type === 'result') {
         setRecommendations(prev => {
           const next = [...prev, d as HedgeRecommendation].sort(
-            (a, b) => b.hedge_confidence - a.hedge_confidence,
+            (a, b) => Math.abs(b.correlation) - Math.abs(a.correlation),
           );
           onRecommendationsUpdate?.(next, pos);
           return next;
@@ -464,7 +464,7 @@ export default function HedgeScanner({
             {recommendations.length > 0 && (
               <>
                 <p className="text-xs text-zinc-500 uppercase tracking-widest">
-                  {recommendations.length} hedge candidate{recommendations.length !== 1 ? 's' : ''} — ranked by confidence
+                  {recommendations.length} hedge candidate{recommendations.length !== 1 ? 's' : ''} — ranked by |correlation|
                   {scanning && <span className="text-indigo-400 animate-pulse ml-2">· live</span>}
                 </p>
                 {recommendations.map((rec, i) => (
