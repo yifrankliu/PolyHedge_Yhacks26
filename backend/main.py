@@ -690,6 +690,104 @@ async def search_polymarket(search: str = Query(..., min_length=1)):
     return matches
 
 
+@app.get("/markets/polymarket/by-slug")
+async def polymarket_by_slug(slug: str = Query(..., min_length=1)):
+    """Look up a single Polymarket market by its URL slug via Gamma API (bypasses Oddpool)."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={"slug": slug, "limit": 1},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
+    raw = resp.json()
+    markets = raw if isinstance(raw, list) else raw.get("markets", [])
+    if not markets:
+        raise HTTPException(404, "No market found for that slug")
+    m = markets[0]
+    return [{
+        "id": m.get("conditionId") or str(m.get("id")),
+        "question": m.get("question"),
+        "price": float(m.get("lastTradePrice") or 0),
+        "volume": m.get("volumeNum") or m.get("volume"),
+        "end_date": m.get("endDateIso") or m.get("endDate"),
+        "source": "polymarket",
+    }]
+
+
+@app.get("/markets/tags")
+async def list_tags():
+    """Return all Polymarket tags (cached 24h). Used by the tag-chip UI in MarketSearchWidget."""
+    tags = await fetch_tags_cached()
+    return [
+        {"id": t.get("id"), "slug": t.get("slug"), "label": t.get("label"), "count": t.get("count", 0)}
+        for t in tags if t.get("id") and t.get("label")
+    ]
+
+
+@app.get("/markets/polymarket/by-tag")
+async def markets_by_tag(tag_id: int = Query(...), limit: int = Query(20, le=50)):
+    """Fetch open Polymarket markets for a specific tag_id, ordered by volume."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{POLYMARKET_GAMMA}/markets",
+            params={"tag_id": tag_id, "closed": "false", "order": "volumeNum", "ascending": "false", "limit": limit},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
+    raw = resp.json()
+    markets = raw if isinstance(raw, list) else raw.get("markets", [])
+    return [
+        {
+            "id": m.get("conditionId") or str(m.get("id")),
+            "question": m.get("question"),
+            "price": float(m.get("lastTradePrice") or 0),
+            "volume": m.get("volumeNum") or m.get("volume"),
+            "end_date": m.get("endDateIso") or m.get("endDate"),
+            "source": "polymarket",
+        }
+        for m in markets if m.get("conditionId") or m.get("id")
+    ]
+
+
+@app.get("/markets/polymarket/search")
+async def search_polymarket_unified(q: str = Query(..., min_length=1)):
+    """
+    Unified Polymarket search: Gamma /public-search + tag fuzzy-match + Oddpool supplement,
+    all run in parallel. Results deduplicated and merged (max 25).
+    """
+    print(f"\n[SEARCH] ── /markets/polymarket/search q={q!r} ──────────────────────")
+
+    async def _empty() -> list:
+        return []
+
+    gamma_task   = _gamma_public_search(q)
+    tag_task     = _gamma_tag_search(q)
+    oddpool_task = _oddpool_search_supplement(q) if ODDPOOL_API_KEY else _empty()
+
+    gamma_results, tag_results, oddpool_results = await asyncio.gather(
+        gamma_task, tag_task, oddpool_task, return_exceptions=True
+    )
+
+    print(f"[SEARCH] gather results: gamma={repr(gamma_results)[:120]} tag={repr(tag_results)[:80]} oddpool={repr(oddpool_results)[:80]}")
+
+    gamma_list   = gamma_results   if isinstance(gamma_results, list)   else []
+    tag_list     = tag_results     if isinstance(tag_results, list)     else []
+    oddpool_list = oddpool_results if isinstance(oddpool_results, list) else []
+
+    print(f"[SEARCH] counts before merge: gamma={len(gamma_list)} tag={len(tag_list)} oddpool={len(oddpool_list)}")
+    if not isinstance(gamma_results, list):
+        print(f"[SEARCH] gamma EXCEPTION: {gamma_results}")
+    if not isinstance(tag_results, list):
+        print(f"[SEARCH] tag EXCEPTION: {tag_results}")
+    if not isinstance(oddpool_results, list):
+        print(f"[SEARCH] oddpool EXCEPTION: {oddpool_results}")
+
+    merged = _merge_search_results(gamma_list, tag_list, oddpool_list)
+    print(f"[SEARCH] merged total={len(merged)} returning to client")
+    return merged
+
+
 @app.get("/markets/polymarket/{market_id}")
 async def get_polymarket_market(market_id: str):
     async with httpx.AsyncClient(timeout=10) as client:
@@ -894,104 +992,6 @@ async def bl_comparison(
         "divergences": divergences,
         "errors": errors,
     }
-
-
-@app.get("/markets/polymarket/by-slug")
-async def polymarket_by_slug(slug: str = Query(..., min_length=1)):
-    """Look up a single Polymarket market by its URL slug via Gamma API (bypasses Oddpool)."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{POLYMARKET_GAMMA}/markets",
-            params={"slug": slug, "limit": 1},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
-    raw = resp.json()
-    markets = raw if isinstance(raw, list) else raw.get("markets", [])
-    if not markets:
-        raise HTTPException(404, "No market found for that slug")
-    m = markets[0]
-    return [{
-        "id": m.get("conditionId") or str(m.get("id")),
-        "question": m.get("question"),
-        "price": float(m.get("lastTradePrice") or 0),
-        "volume": m.get("volumeNum") or m.get("volume"),
-        "end_date": m.get("endDateIso") or m.get("endDate"),
-        "source": "polymarket",
-    }]
-
-
-@app.get("/markets/tags")
-async def list_tags():
-    """Return all Polymarket tags (cached 24h). Used by the tag-chip UI in MarketSearchWidget."""
-    tags = await fetch_tags_cached()
-    return [
-        {"id": t.get("id"), "slug": t.get("slug"), "label": t.get("label"), "count": t.get("count", 0)}
-        for t in tags if t.get("id") and t.get("label")
-    ]
-
-
-@app.get("/markets/polymarket/by-tag")
-async def markets_by_tag(tag_id: int = Query(...), limit: int = Query(20, le=50)):
-    """Fetch open Polymarket markets for a specific tag_id, ordered by volume."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{POLYMARKET_GAMMA}/markets",
-            params={"tag_id": tag_id, "closed": "false", "order": "volumeNum", "ascending": "false", "limit": limit},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Gamma API error: {resp.status_code}")
-    raw = resp.json()
-    markets = raw if isinstance(raw, list) else raw.get("markets", [])
-    return [
-        {
-            "id": m.get("conditionId") or str(m.get("id")),
-            "question": m.get("question"),
-            "price": float(m.get("lastTradePrice") or 0),
-            "volume": m.get("volumeNum") or m.get("volume"),
-            "end_date": m.get("endDateIso") or m.get("endDate"),
-            "source": "polymarket",
-        }
-        for m in markets if m.get("conditionId") or m.get("id")
-    ]
-
-
-@app.get("/markets/polymarket/search")
-async def search_polymarket_unified(q: str = Query(..., min_length=1)):
-    """
-    Unified Polymarket search: Gamma /public-search + tag fuzzy-match + Oddpool supplement,
-    all run in parallel. Results deduplicated and merged (max 25).
-    """
-    print(f"\n[SEARCH] ── /markets/polymarket/search q={q!r} ──────────────────────")
-
-    async def _empty() -> list:
-        return []
-
-    gamma_task   = _gamma_public_search(q)
-    tag_task     = _gamma_tag_search(q)
-    oddpool_task = _oddpool_search_supplement(q) if ODDPOOL_API_KEY else _empty()
-
-    gamma_results, tag_results, oddpool_results = await asyncio.gather(
-        gamma_task, tag_task, oddpool_task, return_exceptions=True
-    )
-
-    print(f"[SEARCH] gather results: gamma={repr(gamma_results)[:120]} tag={repr(tag_results)[:80]} oddpool={repr(oddpool_results)[:80]}")
-
-    gamma_list   = gamma_results   if isinstance(gamma_results, list)   else []
-    tag_list     = tag_results     if isinstance(tag_results, list)     else []
-    oddpool_list = oddpool_results if isinstance(oddpool_results, list) else []
-
-    print(f"[SEARCH] counts before merge: gamma={len(gamma_list)} tag={len(tag_list)} oddpool={len(oddpool_list)}")
-    if not isinstance(gamma_results, list):
-        print(f"[SEARCH] gamma EXCEPTION: {gamma_results}")
-    if not isinstance(tag_results, list):
-        print(f"[SEARCH] tag EXCEPTION: {tag_results}")
-    if not isinstance(oddpool_results, list):
-        print(f"[SEARCH] oddpool EXCEPTION: {oddpool_results}")
-
-    merged = _merge_search_results(gamma_list, tag_list, oddpool_list)
-    print(f"[SEARCH] merged total={len(merged)} returning to client")
-    return merged
 
 
 @app.get("/markets/polymarket/{market_id}/history")
