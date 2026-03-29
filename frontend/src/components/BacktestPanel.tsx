@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+const Plot = lazy(() => import('react-plotly.js'));
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as ReTooltip, ResponsiveContainer, ReferenceLine,
@@ -6,8 +7,7 @@ import {
 } from 'recharts';
 import { runBacktest, BacktestResponse, ScenarioItem } from '../api/client';
 
-// ── Lazy-load Plotly (3.5 MB — only on demand) ────────────────────────────────
-const Plot = React.lazy(() => import('react-plotly.js'));
+// ── Plotly lazy-loaded on demand (3.5 MB) ────────────────────────────────────
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Props {
@@ -175,21 +175,26 @@ export default function BacktestPanel({
     }));
   }, [result]);
 
-  // ── Terminal histogram + KDE from backend ──────────────────────────────────
+  // ── Terminal histogram + KDE merged into one dataset ─────────────────────
+  // Recharts v3 doesn't allow per-series `data` props inside ComposedChart.
+  // Interpolate KDE at each histogram bin center so both share the same x-axis.
   const termData = useMemo(() => {
     if (!result) return [];
-    const { terminal_histogram: h, terminal_kde: k } = result.simulation;
-    // Merge histogram bins and KDE into one dataset for ComposedChart
-    const maxBins = h.centers.length;
-    return h.centers.map((x, i) => ({ x: parseFloat(x.toFixed(2)), density: h.density[i] }));
-  }, [result]);
-
-  const kdeData = useMemo(() => {
-    if (!result) return [];
-    return result.simulation.terminal_kde.x.map((x, i) => ({
-      x: parseFloat(x.toFixed(2)),
-      kde: result.simulation.terminal_kde.y[i],
-    }));
+    const h = result.simulation.terminal_histogram;
+    const k = result.simulation.terminal_kde;
+    return h.centers.map((x, i) => {
+      // Binary-search for nearest KDE index
+      let lo = 0, hi = k.x.length - 1, ki = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (k.x[mid] < x) { lo = mid + 1; ki = mid; } else { hi = mid - 1; }
+      }
+      const x0 = k.x[ki], x1 = k.x[ki + 1] ?? x0;
+      const y0 = k.y[ki], y1 = k.y[ki + 1] ?? y0;
+      const t = x1 === x0 ? 0 : (x - x0) / (x1 - x0);
+      const kde = Math.max(0, y0 + t * (y1 - y0));
+      return { x: parseFloat(x.toFixed(2)), density: h.density[i], kde };
+    });
   }, [result]);
 
   // ── Walk-forward data ──────────────────────────────────────────────────────
@@ -426,7 +431,7 @@ export default function BacktestPanel({
           sub="Histogram of final P&L across all simulated paths with KDE overlay"
         />
         <ResponsiveContainer width="100%" height={180}>
-          <ComposedChart margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+          <ComposedChart data={termData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
             <XAxis
               dataKey="x"
@@ -439,9 +444,7 @@ export default function BacktestPanel({
             />
             <YAxis tick={false} axisLine={false} tickLine={false} width={0} />
             <ReTooltip
-              formatter={(v: any, name: string) => [
-                name === 'density' ? (v as number).toFixed(4) : (v as number).toFixed(4), name,
-              ]}
+              formatter={(v: any, name: string | undefined) => [(v as number).toFixed(4), name ?? '']}
               contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
             />
             <ReferenceLine x={0} stroke={ZINC_600} strokeDasharray="4 2" />
@@ -449,8 +452,8 @@ export default function BacktestPanel({
               label={{ value: 'VaR', position: 'top', fill: RED, fontSize: 9 }} />
             <ReferenceLine x={sim.expected_shortfall_5pct} stroke={AMBER} strokeDasharray="3 2"
               label={{ value: 'ES', position: 'top', fill: AMBER, fontSize: 9 }} />
-            <Bar data={termData} dataKey="density" fill={INDIGO} fillOpacity={0.45} radius={[2, 2, 0, 0]} isAnimationActive={false} />
-            <Line data={kdeData} dataKey="kde" stroke={IND_MED} strokeWidth={2} dot={false} isAnimationActive={false} />
+            <Bar dataKey="density" fill={INDIGO} fillOpacity={0.45} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+            <Line dataKey="kde" stroke={IND_MED} strokeWidth={2} dot={false} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -569,7 +572,7 @@ export default function BacktestPanel({
                   />
                   <ReTooltip
                     contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
-                    formatter={(v: any, name: string) => [(v as number).toFixed(3), name]}
+                    formatter={(v: any, name: string | undefined) => [(v as number).toFixed(3), name ?? '']}
                   />
                   <ReferenceLine y={0} stroke={ZINC_600} strokeDasharray="4 2" />
                   <Line type="monotone" dataKey="hedged" stroke={IND_MED} strokeWidth={2} dot={false} name="Hedged" isAnimationActive={false} />

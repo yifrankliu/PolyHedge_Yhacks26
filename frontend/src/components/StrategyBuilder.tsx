@@ -1,5 +1,4 @@
-import React, { useState, useMemo, lazy, Suspense } from 'react';
-const BacktestPanel = lazy(() => import('./BacktestPanel'));
+import React, { useState, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -12,6 +11,7 @@ import {
 } from 'recharts';
 import { HedgeRecommendation } from '../api/client';
 import { PortfolioPosition } from './PortfolioInputPage';
+import BacktestPanel from './BacktestPanel';
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 const PALETTE = [
@@ -698,22 +698,16 @@ export default function StrategyBuilder({ positions, recommendations }: Props) {
             const h = activeStrategy.hedges.find(h => h.candidate_market_id === backtestHedgeId);
             if (!h) return null;
             return (
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-10 text-zinc-500 text-sm">
-                  Loading stress test…
-                </div>
-              }>
-                <BacktestPanel
-                  marketAId={pos.market_id}
-                  marketBId={h.candidate_market_id}
-                  direction={pos.side}
-                  entryPrice={pos.entry_price_cents / 100}
-                  positionSize={pos.stake_usd}
-                  hedgeDirection={h.hedge_direction}
-                  hedgeSize={h.recommended_size}
-                  questionB={h.question}
-                />
-              </Suspense>
+              <BacktestPanel
+                marketAId={pos.market_id}
+                marketBId={h.candidate_market_id}
+                direction={pos.side}
+                entryPrice={pos.entry_price_cents / 100}
+                positionSize={pos.stake_usd}
+                hedgeDirection={h.hedge_direction}
+                hedgeSize={h.recommended_size}
+                questionB={h.question}
+              />
             );
           })()}
         </div>
