@@ -17,7 +17,14 @@ const TABS: { id: string; label: string; disabled?: boolean }[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('whatif');
-  const [pendingMarket, setPendingMarket] = useState<Market | null>(null);
+  const [pendingMarketA, setPendingMarketA] = useState<Market | null>(null);
+  const [pendingMarketB, setPendingMarketB] = useState<Market | null>(null);
+
+  const handleCompare = (target: Market, correlated: Market) => {
+    setPendingMarketA(target);
+    setPendingMarketB(correlated);
+    setActiveTab('compare');
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -70,15 +77,16 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-6 py-8">
         {activeTab === 'whatif' && <WhatIfAnalyzer />}
         {activeTab === 'bl' && <BLComparison />}
-        {activeTab === 'compare' && <MarketCompare initialMarketB={pendingMarket ?? undefined} />}
-        {activeTab === 'scanner' && (
-          <CorrelationScanner
-            onCompare={(m: Market) => {
-              setPendingMarket(m);
-              setActiveTab('compare');
-            }}
+        {activeTab === 'compare' && (
+          <MarketCompare
+            initialMarketA={pendingMarketA ?? undefined}
+            initialMarketB={pendingMarketB ?? undefined}
           />
         )}
+        {/* Scanner stays mounted to preserve results; hidden when inactive */}
+        <div style={{ display: activeTab === 'scanner' ? 'block' : 'none' }}>
+          <CorrelationScanner onCompare={handleCompare} />
+        </div>
       </main>
     </div>
   );

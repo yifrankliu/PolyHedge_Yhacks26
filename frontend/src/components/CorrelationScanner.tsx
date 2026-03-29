@@ -58,7 +58,7 @@ function lagLabel(best_lag_days: number, lead_direction: string): string {
   return lead_direction === 'A_leads_B' ? `A+${abs}d` : `B+${abs}d`;
 }
 
-export default function CorrelationScanner({ onCompare }: { onCompare: (m: Market) => void }) {
+export default function CorrelationScanner({ onCompare }: { onCompare: (target: Market, correlated: Market) => void }) {
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Market[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -299,14 +299,17 @@ export default function CorrelationScanner({ onCompare }: { onCompare: (m: Marke
                     </td>
                     <td className="px-3 py-3 text-right">
                       <button
-                        onClick={() => onCompare({
-                          id: r.market_id,
-                          question: r.question,
-                          price: r.last_price,
-                          volume: null,
-                          end_date: null,
-                          source: 'polymarket',
-                        })}
+                        onClick={() => onCompare(
+                          selectedMarket!,
+                          {
+                            id: r.market_id,
+                            question: r.question,
+                            price: r.last_price,
+                            volume: null,
+                            end_date: null,
+                            source: 'polymarket',
+                          }
+                        )}
                         className="text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-200 px-2 py-1 rounded transition-colors"
                         title="Open in Market Comparator"
                       >

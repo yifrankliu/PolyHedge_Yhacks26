@@ -398,7 +398,7 @@ function CorrelationPanel({ result, marketA, marketB, loading }: {
   );
 }
 
-export default function MarketCompare({ initialMarketB }: { initialMarketB?: Market }) {
+export default function MarketCompare({ initialMarketA, initialMarketB }: { initialMarketA?: Market; initialMarketB?: Market }) {
   const [marketA, setMarketA] = useState<Market | null>(null);
   const [marketB, setMarketB] = useState<Market | null>(null);
   const [historyA, setHistoryA] = useState<MarketHistory | null>(null);
@@ -453,11 +453,14 @@ export default function MarketCompare({ initialMarketB }: { initialMarketB?: Mar
     fetchHistory(m, 'B', interval);
   };
 
-  // Pre-populate Market B when navigating from Correlation Scanner
+  // Pre-populate markets when navigating from Correlation Scanner
   useEffect(() => {
-    if (initialMarketB?.id) {
-      handleSelectB(initialMarketB);
-    }
+    if (initialMarketA?.id) handleSelectA(initialMarketA);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMarketA?.id]);
+
+  useEffect(() => {
+    if (initialMarketB?.id) handleSelectB(initialMarketB);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMarketB?.id]);
 
