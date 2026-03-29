@@ -191,7 +191,7 @@ export default function App() {
           >
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${demoMode ? 'bg-amber-400' : 'bg-zinc-600'}`} />
             <span>{demoMode ? 'Demo Mode ON' : 'Demo Mode'}</span>
-            {demoMode && <span className="ml-auto text-[10px] text-amber-500">BTC $100k</span>}
+            {demoMode && <span className="ml-auto text-[10px] text-amber-500">Iran regime</span>}
           </button>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span className="relative flex h-1.5 w-1.5">
