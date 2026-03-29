@@ -65,9 +65,10 @@ def rigorous_event_hedge(
     history_a: list[dict],
     history_b: list[dict],
     *,
-    spike_quantile: float = 0.9,
+    spike_quantile: float = 0.75,
     max_events: int = 100,
-    min_events: int = 12,
+    min_events: int = 8,
+    min_shared_days: int = 20,
 ) -> dict:
     """
     Returns robust event-study hedge metrics for A hedged with B.
@@ -80,8 +81,8 @@ def rigorous_event_hedge(
       - confidence: 0-1 quality indicator
     """
     sa, sb = align_series(history_a, history_b)
-    if len(sa) < 20:
-        return {"error": "Insufficient shared history (<20 days)"}
+    if len(sa) < min_shared_days:
+        return {"error": f"Insufficient shared history ({len(sa)}d, need {min_shared_days}d)", "n_shared_days": int(len(sa))}
 
     pa = sa.values.astype(float)
     pb = sb.values.astype(float)
@@ -92,8 +93,8 @@ def rigorous_event_hedge(
     ra = ra[mask]
     rb = rb[mask]
 
-    if len(ra) < 20:
-        return {"error": "Insufficient clean returns"}
+    if len(ra) < min_shared_days:
+        return {"error": "Insufficient clean returns", "n_shared_days": int(len(sa))}
 
     abs_ra = np.abs(ra)
     q = float(np.clip(spike_quantile, 0.5, 0.99))
@@ -112,7 +113,7 @@ def rigorous_event_hedge(
     y = y[nonzero]
 
     if len(x) < min_events:
-        return {"error": f"Not enough spike events (found {len(x)}, need >= {min_events})"}
+        return {"error": f"Not enough spike events ({len(x)}, need {min_events})", "n_shared_days": int(len(sa)), "n_events": int(len(x))}
 
     # Legacy-style normalized points from your idea.
     ratios = y / x

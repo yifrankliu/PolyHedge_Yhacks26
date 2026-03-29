@@ -1,12 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  scanHedges,
-  HedgeRequest,
-  HedgeResponse,
   HedgeRecommendation,
   BLSignalOut,
+  FailedHedgeCandidate,
 } from '../api/client';
 import { PortfolioPosition } from './PortfolioInputPage';
+
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+// ── Tooltip ────────────────────────────────────────────────────────────────────
+
+function Tooltip({ text }: { text: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+        onFocus={() => setVisible(true)}
+        onBlur={() => setVisible(false)}
+        className="text-gray-600 hover:text-gray-400 transition-colors leading-none"
+        tabIndex={-1}
+        type="button"
+      >
+        ⓘ
+      </button>
+      {visible && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 border border-gray-600 text-gray-200 text-xs rounded-lg px-3 py-2 shadow-lg z-50 pointer-events-none">
+          {text}
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-600" />
+        </span>
+      )}
+    </span>
+  );
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -224,24 +251,87 @@ function RecommendationCard({ rec, index }: { rec: HedgeRecommendation; index: n
   );
 }
 
+function FailedCandidatesBlock({ failed }: { failed: FailedHedgeCandidate[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (failed.length === 0) return null;
+
+  return (
+    <div className="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full px-5 py-3 border-b border-gray-700 flex items-center justify-between hover:bg-gray-800/50 transition-colors"
+      >
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          {failed.length} considered but excluded
+        </h3>
+        <span className="text-xs text-gray-600">{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="text-left px-5 py-2.5 text-xs text-gray-500 font-medium w-8">#</th>
+                <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Market</th>
+                <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Price</th>
+                <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Shared days</th>
+                <th className="text-right px-3 py-2.5 text-xs text-gray-500 font-medium">Spike events</th>
+                <th className="text-left px-3 py-2.5 text-xs text-gray-500 font-medium">Excluded reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {failed.map((c, i) => (
+                <tr key={c.candidate_market_id} className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
+                  <td className="px-5 py-3 text-gray-500 text-xs">{i + 1}</td>
+                  <td className="px-3 py-3 max-w-xs">
+                    <p className="text-white text-xs leading-snug line-clamp-2">{c.question}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{c.platform}</p>
+                  </td>
+                  <td className="px-3 py-3 text-right text-gray-300 text-xs font-mono">{fmtPct(c.current_price)}</td>
+                  <td className="px-3 py-3 text-right text-xs text-gray-400">
+                    {c.shared_history_days != null ? `${c.shared_history_days}d` : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-right text-xs text-gray-400">
+                    {c.n_events != null ? c.n_events : '—'}
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs text-red-400 bg-red-900/30 border border-red-800 rounded px-2 py-1 whitespace-nowrap">
+                      {c.fail_reason}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function HedgeScanner({ initialPositions = [] }: { initialPositions?: PortfolioPosition[] }) {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<HedgeResponse | null>(null);
-  const [error, setError] = useState('');
+const DEFAULT_MIN_EVENTS = 8;
+const DEFAULT_MIN_SHARED_DAYS = 32;
+const DEFAULT_TOP_N = 75;
 
-  const handleSubmit = async (req: HedgeRequest) => {
-    setError('');
-    setLoading(true);
-    setResult(null);
-    try {
-      setResult(await scanHedges(req));
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to connect to backend.');
-    } finally {
-      setLoading(false);
-    }
+export default function HedgeScanner({ initialPositions = [] }: { initialPositions?: PortfolioPosition[] }) {
+  const [scanning, setScanning] = useState(false);
+  const [done, setDone] = useState(false);
+  const [scanned, setScanned] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [foundCount, setFoundCount] = useState(0);
+  const [recommendations, setRecommendations] = useState<HedgeRecommendation[]>([]);
+  const [failedCandidates, setFailedCandidates] = useState<FailedHedgeCandidate[]>([]);
+  const [error, setError] = useState('');
+  const [minEvents, setMinEvents] = useState(DEFAULT_MIN_EVENTS);
+  const [minSharedDays, setMinSharedDays] = useState(DEFAULT_MIN_SHARED_DAYS);
+  const [topN, setTopN] = useState(DEFAULT_TOP_N);
+  const esRef = useRef<EventSource | null>(null);
+
+  const stopScan = () => {
+    esRef.current?.close();
+    setScanning(false);
   };
 
   const scanPosition = (pos: PortfolioPosition) => {
@@ -249,15 +339,57 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
       setError('Hedge scanning only supports Polymarket positions (requires price history).');
       return;
     }
-    const req: HedgeRequest = {
+    esRef.current?.close();
+    setScanning(true);
+    setDone(false);
+    setRecommendations([]);
+    setFailedCandidates([]);
+    setScanned(0);
+    setTotal(0);
+    setFoundCount(0);
+    setError('');
+
+    const params = new URLSearchParams({
       market_id: pos.market_id,
       direction: pos.side,
-      entry_price: pos.entry_price_cents / 100,
-      current_price: pos.entry_price_cents / 100,
-      position_size: pos.stake_usd,
-      search_query: pos.market_question.split(' ').slice(0, 6).join(' '),
+      position_size: String(pos.stake_usd),
+      min_events: String(minEvents),
+      min_shared_days: String(minSharedDays),
+      top_n: String(topN),
+    });
+
+    const es = new EventSource(`${BASE_URL}/hedge/scan/stream?${params}`);
+    esRef.current = es;
+
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      if (d.type === 'init') {
+        setTotal(d.total);
+      } else if (d.type === 'progress') {
+        setScanned(d.scanned);
+        setFoundCount(d.found);
+      } else if (d.type === 'result') {
+        setRecommendations(prev =>
+          [...prev, d as HedgeRecommendation].sort((a, b) => b.hedge_confidence - a.hedge_confidence)
+        );
+      } else if (d.type === 'done') {
+        setScanned(d.scanned);
+        setFoundCount(d.found);
+        setFailedCandidates((d.failed_candidates || []).slice(0, 8));
+        setDone(true);
+        setScanning(false);
+        es.close();
+      } else if (d.type === 'error') {
+        setError(d.message);
+        setScanning(false);
+        es.close();
+      }
     };
-    handleSubmit(req);
+    es.onerror = () => {
+      setError('Connection lost — try again.');
+      setScanning(false);
+      es.close();
+    };
   };
 
   return (
@@ -265,8 +397,7 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Hedge Scanner</h2>
         <p className="text-gray-400 text-sm mt-1">
-          Finds correlated markets to hedge your positions. Uses minimum-variance sizing with
-          optional Deribit options signal for crypto markets.
+          Scans the top 1,000 Polymarket markets — pre-filtered by semantic similarity to your position — and runs an event-study hedge analysis on the most relevant candidates. Uses Huber robust regression on spike events to estimate a blended hedge ratio, with bootstrap confidence intervals to measure reliability.
         </p>
       </div>
 
@@ -282,19 +413,65 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
             </p>
             <div className="space-y-2">
               {initialPositions.map((pos) => (
-                <div key={pos.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
-                  <div>
+                <div key={pos.id} className="flex items-center gap-3 bg-gray-800 rounded-lg px-4 py-3">
+                  {/* Market info */}
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm text-white">{pos.market_question}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {pos.source} · {pos.side} · {pos.entry_price_cents.toFixed(1)}¢ · ${pos.stake_usd}
                     </p>
                   </div>
+
+                  {/* Threshold controls */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 h-[38px]">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">min spikes =</span>
+                      <input
+                        type="number"
+                        min={3}
+                        max={50}
+                        value={minEvents}
+                        onChange={(e) => setMinEvents(Math.max(3, Math.min(50, Number(e.target.value))))}
+                        className="w-10 bg-transparent text-white text-xs font-semibold text-center outline-none"
+                      />
+                      <Tooltip text={`Minimum spike events for Huber IRLS regression (default ${DEFAULT_MIN_EVENTS}). Below this the robust estimate is unreliable.`} />
+                    </div>
+                    <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 h-[38px]">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">min days =</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={90}
+                        value={minSharedDays}
+                        onChange={(e) => setMinSharedDays(Math.max(5, Math.min(90, Number(e.target.value))))}
+                        className="w-10 bg-transparent text-white text-xs font-semibold text-center outline-none"
+                      />
+                      <Tooltip text={`Minimum overlapping price history between markets (default ${DEFAULT_MIN_SHARED_DAYS}). Below this, correlation estimates are unreliable.`} />
+                    </div>
+                    <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 h-[38px]">
+                      <span className="text-xs text-gray-400 whitespace-nowrap">top N =</span>
+                      <input
+                        type="number"
+                        min={10}
+                        max={1000}
+                        value={topN}
+                        onChange={(e) => setTopN(Math.max(10, Math.min(1000, Number(e.target.value))))}
+                        className="w-12 bg-transparent text-white text-xs font-semibold text-center outline-none"
+                      />
+                      <Tooltip text={`How many of the 1,000 universe markets to run rigorous hedge on, ranked by semantic similarity (default ${DEFAULT_TOP_N}). Raise toward 1,000 for exhaustive search.`} />
+                    </div>
+                  </div>
+
+                  {/* Scan button */}
                   <button
-                    onClick={() => scanPosition(pos)}
-                    disabled={loading}
-                    className="ml-4 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium whitespace-nowrap"
+                    onClick={() => scanning ? stopScan() : scanPosition(pos)}
+                    className={`shrink-0 text-white px-4 h-[38px] rounded text-sm font-medium whitespace-nowrap flex items-center transition-colors ${
+                      scanning
+                        ? 'bg-red-700 hover:bg-red-600'
+                        : 'bg-indigo-700 hover:bg-indigo-600'
+                    }`}
                   >
-                    {loading ? '…' : 'Scan'}
+                    {scanning ? 'Stop' : done ? 'Rescan' : 'Scan'}
                   </button>
                 </div>
               ))}
@@ -302,11 +479,21 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
           </div>
 
           <div className="space-y-4">
-            {loading && (
-              <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
-                <div className="text-center">
-                  <p className="text-gray-300 font-medium animate-pulse">Scanning markets…</p>
-                  <p className="text-gray-500 text-xs mt-1">Fetching price histories and computing correlations</p>
+            {/* Progress bar */}
+            {(scanning || done) && total > 0 && (
+              <div className="bg-gray-900 rounded-xl border border-gray-700 px-5 py-4">
+                <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+                  <span>
+                    {done ? 'Complete' : 'Scanning'} — {scanned.toLocaleString()} / {total.toLocaleString()} markets
+                    {' · '}<span className="text-indigo-300 font-medium">{foundCount} found</span>
+                  </span>
+                  <span>{total > 0 ? Math.round((scanned / total) * 100) : 0}%</span>
+                </div>
+                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${total > 0 ? Math.round((scanned / total) * 100) : 0}%` }}
+                  />
                 </div>
               </div>
             )}
@@ -317,36 +504,29 @@ export default function HedgeScanner({ initialPositions = [] }: { initialPositio
               </div>
             )}
 
-            {result && !loading && (
+            {recommendations.length > 0 && (
               <>
-                {Object.keys(result.errors).length > 0 && (
-                  <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
-                    {Object.entries(result.errors).map(([k, v]) => (
-                      <p key={k} className="text-xs text-yellow-300">· <span className="font-medium">{k}:</span> {v}</p>
-                    ))}
-                  </div>
-                )}
-
-                {result.bl_signal && <BLSignalCard signal={result.bl_signal} />}
-
-                {result.recommendations.length === 0 ? (
-                  <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-40">
-                    <p className="text-gray-500 text-sm">No hedge candidates found. Try a position with more trading history.</p>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-gray-500 uppercase tracking-wider">
-                      {result.recommendations.length} hedge candidate{result.recommendations.length !== 1 ? 's' : ''} — ranked by confidence
-                    </p>
-                    {result.recommendations.map((rec, i) => (
-                      <RecommendationCard key={rec.candidate_market_id} rec={rec} index={i} />
-                    ))}
-                  </>
-                )}
+                <p className="text-xs text-gray-500 uppercase tracking-wider">
+                  {recommendations.length} hedge candidate{recommendations.length !== 1 ? 's' : ''} — ranked by confidence
+                  {scanning && <span className="text-indigo-400 animate-pulse ml-2">· live</span>}
+                </p>
+                {recommendations.map((rec, i) => (
+                  <RecommendationCard key={rec.candidate_market_id} rec={rec} index={i} />
+                ))}
               </>
             )}
 
-            {!result && !loading && !error && (
+            {done && recommendations.length === 0 && (
+              <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-32">
+                <p className="text-gray-500 text-sm">No hedge candidates passed the quality threshold.</p>
+              </div>
+            )}
+
+            {failedCandidates.length > 0 && done && (
+              <FailedCandidatesBlock failed={failedCandidates} />
+            )}
+
+            {!scanning && !done && !error && (
               <div className="bg-gray-900 rounded-xl border border-gray-700 flex items-center justify-center h-48">
                 <p className="text-gray-500 text-sm">Select a position above to scan for hedges.</p>
               </div>
