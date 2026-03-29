@@ -521,7 +521,7 @@ def _polymarket_yes_price(market: dict):
 
 def _normalize_polymarket_market(market: dict):
     return {
-        "id": str(market.get("id")),
+        "id": market.get("conditionId") or str(market.get("id")),
         "question": market.get("question"),
         "price": _polymarket_yes_price(market),
         "volume": _to_float(market.get("volume")),
